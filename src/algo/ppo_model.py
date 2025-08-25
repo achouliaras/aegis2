@@ -63,8 +63,9 @@ class PPOModel(ActorCriticCnnPolicy):
         gru_layers: int = 1,
         policy_mlp_layers: int = 1,
         total_timesteps: int = 0,
+        pretrain_percentage: float = 0.0,
         n_steps: int = 0,
-        int_rew_source: ModelType = ModelType.DEIR,
+        int_rew_source: ModelType = ModelType.AEGIS,
         icm_forward_loss_coef: float = 0.2,
         ngu_knn_k: int = 10,
         ngu_dst_momentum: float = -1,
@@ -96,6 +97,7 @@ class PPOModel(ActorCriticCnnPolicy):
         self.use_status_predictor = use_status_predictor
         self.policy_mlp_layers = policy_mlp_layers
         self.total_timesteps = total_timesteps
+        self.pretrain_percentage = pretrain_percentage
         self.n_steps = n_steps
         self.policy_gru_cell = GRUCell if self.policy_gru_norm == NormType.NoNorm else CustomGRUCell
         self.model_gru_cell = GRUCell if self.model_gru_norm == NormType.NoNorm else CustomGRUCell
@@ -180,7 +182,7 @@ class PPOModel(ActorCriticCnnPolicy):
             use_status_predictor=self.use_status_predictor,
         )
 
-        if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
+        if self.int_rew_source in [ModelType.AEGIS, ModelType.DEIR, ModelType.PlainDiscriminator]:
             self.int_rew_model = DiscriminatorModel(
                 **int_rew_model_kwargs,
                 obs_rng=np.random.default_rng(seed=self.run_id + 131),

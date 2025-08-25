@@ -49,6 +49,7 @@ class PPORollout(BaseAlgorithm):
         enable_plotting : int,
         can_see_walls : int,
         ext_rew_coef: float,
+        ext_rew_pretrain_coef: float,
         adv_norm: int,
         adv_eps: float,
         max_grad_norm: float,
@@ -103,6 +104,7 @@ class PPORollout(BaseAlgorithm):
         self.can_see_walls = can_see_walls
         self.int_rew_momentum = int_rew_momentum
         self.ext_rew_coef = ext_rew_coef
+        self.ext_rew_pretrain_coef = ext_rew_pretrain_coef
         self.adv_norm = adv_norm
         self.adv_eps = adv_eps
         self.env_source = env_source
@@ -141,6 +143,7 @@ class PPORollout(BaseAlgorithm):
             dim_model_traj=self.policy.dim_model_features,
             int_rew_coef=self.int_rew_coef,
             ext_rew_coef=self.ext_rew_coef,
+            ext_rew_pretrain_coef=self.ext_rew_pretrain_coef,
             int_rew_norm=self.int_rew_norm,
             int_rew_clip=self.int_rew_clip,
             int_rew_eps=self.int_rew_eps,
@@ -150,6 +153,7 @@ class PPORollout(BaseAlgorithm):
             gru_layers=self.policy.gru_layers,
             int_rew_momentum=self.int_rew_momentum,
             use_status_predictor=self.policy.use_status_predictor,
+            curr_timesteps = self.num_timesteps
         )
 
 
@@ -215,6 +219,10 @@ class PPORollout(BaseAlgorithm):
 
         if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
             self.policy.int_rew_model.init_obs_queue(self._last_obs)
+
+        if self.int_rew_source in [ModelType.AEGIS]:
+            self.policy.int_rew_model.init_obs_queue(self._last_obs, queue="local") # Local queue resets
+            # Global queue doesn't reset
 
         def float_zeros(tensor_shape):
             return th.zeros(tensor_shape, device=self.device, dtype=th.float32)
@@ -540,8 +548,8 @@ class PPORollout(BaseAlgorithm):
                 door_status_tensor = None
                 target_dists_tensor = None
 
-        # DEIR / Plain discriminator model
-        if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
+        # AEGIS / DEIR / Plain discriminator model
+        if self.int_rew_source in [ModelType.AEGIS, ModelType.DEIR, ModelType.PlainDiscriminator]:
             intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
                 curr_obs=curr_obs_tensor,
                 next_obs=next_obs_tensor,
@@ -560,6 +568,15 @@ class PPORollout(BaseAlgorithm):
                     new_obs=new_obs,
                     stats_logger=self.rollout_stats
                 )
+            elif self.int_rew_source in [ModelType.AEGIS]:
+                self.policy.int_rew_model.update_obs_queue(
+                    iteration=self.iteration,
+                    intrinsic_rewards=intrinsic_rewards,
+                    local_ir_mean=self.ppo_rollout_buffer.int_rew_stats.mean,
+                    new_obs=new_obs,
+                    stats_logger=self.rollout_stats
+                )
+
         # Plain forward / inverse model
         elif self.int_rew_source in [ModelType.PlainForward, ModelType.PlainInverse]:
             intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
@@ -751,6 +768,7 @@ class PPORollout(BaseAlgorithm):
 
             # Uploading rollout infos
             self.iteration += 1
+            self.ppo_rollout_buffer.update_curr_timesteps(self.num_timesteps)
             self._update_current_progress_remaining(self.num_timesteps, total_timesteps)
             self.log_on_rollout_end(log_interval)
 

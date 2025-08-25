@@ -28,6 +28,7 @@ class PPORolloutBuffer(BaseBuffer):
         dim_model_traj: int = 0,
         int_rew_coef: float = 1.0,
         ext_rew_coef: float = 1.0,
+        ext_rew_pretrain_coef: float = 0.0,
         int_rew_norm: int = 0,
         int_rew_clip: float = 0.0,
         int_rew_eps: float = 1e-8,
@@ -37,6 +38,7 @@ class PPORolloutBuffer(BaseBuffer):
         gru_layers: int = 1,
         int_rew_momentum: Optional[float] = None,
         use_status_predictor: int = 0,
+        curr_timesteps: int = 0,
     ):
         if isinstance(observation_space, Dict):
             observation_space = list(observation_space.values())[0]
@@ -48,6 +50,7 @@ class PPORolloutBuffer(BaseBuffer):
         self.int_rew_norm = int_rew_norm
         self.int_rew_clip = int_rew_clip
         self.ext_rew_coef = ext_rew_coef
+        self.ext_rew_pretrain_coef = ext_rew_pretrain_coef
         self.features_dim = features_dim
         self.dim_policy_traj = dim_policy_traj
         self.dim_model_traj = dim_model_traj
@@ -65,7 +68,7 @@ class PPORolloutBuffer(BaseBuffer):
         self.int_rew_momentum = int_rew_momentum
         self.int_rew_stats = RunningMeanStd(momentum=self.int_rew_momentum)
         self.advantage_stats = RunningMeanStd(momentum=self.adv_momentum)
-
+        self.curr_timesteps = curr_timesteps
         self.generator_ready = False
         self.reset()
 
@@ -112,7 +115,15 @@ class PPORolloutBuffer(BaseBuffer):
 
     def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray) -> None:
         # Rescale extrinisc rewards
-        self.rewards *= self.ext_rew_coef
+        # self.rewards *= self.ext_rew_coef
+        
+        # Rescale extrinsic rewards based on pretraining/training phase
+        if self.curr_timesteps < self.total_steps*self.pretrain_frac:
+           self.rewards *= self.ext_rew_pretrain_coef
+        else:
+          self.rewards *= self.ext_rew_coef
+
+
 
         # Convert to numpy
         last_values = last_values.clone().cpu().numpy().flatten()
@@ -260,3 +271,6 @@ class PPORolloutBuffer(BaseBuffer):
         if not self.use_status_predictor:
             samples += (None, None, None,)
         return RolloutBufferSamples(*samples)
+
+    def update_curr_timesteps(self, curr_timesteps: int) -> None:
+        self.curr_timesteps = curr_timesteps

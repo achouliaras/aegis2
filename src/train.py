@@ -56,6 +56,7 @@ def train(config):
         use_model_rnn=config.use_model_rnn,
         model_gru_norm=config.model_gru_norm,
         total_timesteps=config.total_steps,
+        pretrain_percentage=config.pretrain_percentage,
         n_steps=config.n_steps,
         int_rew_source=config.int_rew_source,
         icm_forward_loss_coef=config.icm_forward_loss_coef,
@@ -89,6 +90,7 @@ def train(config):
         vf_coef=config.vf_coef,
         max_grad_norm=config.max_grad_norm,
         ext_rew_coef=config.ext_rew_coef,
+        ext_rew_pretrain_coef=config.ext_rew_pretrain_coef,
         int_rew_source=config.int_rew_source,
         int_rew_coef=config.int_rew_coef,
         int_rew_norm=config.int_rew_norm,
@@ -127,6 +129,7 @@ def train(config):
 @click.option('--group_name', type=str, help='Group name (wandb option), leave blank if not logging with wandb')
 @click.option('--log_dir', default='./logs', type=str, help='Directory for saving training logs')
 @click.option('--total_steps', default=int(1e6), type=int, help='Total number of frames to run for training')
+@click.option('--pretrain_percentage', default=0.0, type=float, help='Percentage of frames used for pre-training')
 @click.option('--features_dim', default=64, type=int, help='Number of neurons of a learned embedding (PPO)')
 @click.option('--model_features_dim', default=128, type=int,
               help='Number of neurons of a learned embedding (dynamics model)')
@@ -165,9 +168,10 @@ def train(config):
 @click.option('--adv_momentum', default=0.9, type=float, help='EMA smoothing factor for advantage normalization')
 # Reward params
 @click.option('--ext_rew_coef', default=1.0, type=float, help='Coefficient of extrinsic rewards')
+@click.option('--ext_rew_pretrain_coef', default=0.0, type=float, help='Coefficient of extrinsic rewards during pretraining')
 @click.option('--int_rew_coef', default=1e-2, type=float, help='Coefficient of intrinsic rewards (IRs)')
-@click.option('--int_rew_source', default='DEIR', type=str,
-              help='Source of IRs: [NoModel|DEIR|ICM|RND|NGU|NovelD|PlainDiscriminator|PlainInverse|PlainForward]')
+@click.option('--int_rew_source', default='NoModel', type=str,
+              help='Source of IRs: [NoModel|AEGIS|DEIR|ICM|RND|NGU|NovelD|PlainDiscriminator|PlainInverse|PlainForward]')
 @click.option('--int_rew_norm', default=1, type=int,
               help='Normalized IRs by: [0] No normalization [1] Standardization [2] Min-max normalization [3] Standardization w.o. subtracting the mean')
 @click.option('--int_rew_momentum', default=0.9, type=float,
@@ -226,11 +230,11 @@ def train(config):
 @click.option('--use_status_predictor', default=0, type=int,
               help='Whether to train status predictors for analysis (MiniGrid only)')
 def main(
-    run_id, group_name, log_dir, total_steps, features_dim, model_features_dim, learning_rate, model_learning_rate,
+    run_id, group_name, log_dir, total_steps, pretrain_percentage, features_dim, model_features_dim, learning_rate, model_learning_rate,
     num_processes, batch_size, n_steps, env_source, game_name, project_name, map_size, can_see_walls, fully_obs,
     image_noise_scale, procgen_mode, procgen_num_threads, log_explored_states, fixed_seed, n_epochs, model_n_epochs,
     gamma, gae_lambda, pg_coef, vf_coef, ent_coef, max_grad_norm, clip_range, clip_range_vf, adv_norm, adv_eps,
-    adv_momentum, ext_rew_coef, int_rew_coef, int_rew_source, int_rew_norm, int_rew_momentum, int_rew_eps, int_rew_clip,
+    adv_momentum, ext_rew_coef, ext_rew_pretrain_coef, int_rew_coef, int_rew_source, int_rew_norm, int_rew_momentum, int_rew_eps, int_rew_clip,
     dsc_obs_queue_len, icm_forward_loss_coef, ngu_knn_k, ngu_use_rnd, ngu_dst_momentum, rnd_use_policy_emb,
     rnd_err_norm, rnd_err_momentum, use_model_rnn, latents_dim, model_latents_dim, policy_cnn_type, policy_mlp_layers,
     policy_cnn_norm, policy_mlp_norm, policy_gru_norm, model_cnn_type, model_mlp_layers, model_cnn_norm, model_mlp_norm,

@@ -2,7 +2,6 @@ from enum import Enum
 
 from torch import nn
 
-
 class ModelType(Enum):
     NoModel = 0
     ICM = 1  # Forward + Inverse
@@ -13,6 +12,7 @@ class ModelType(Enum):
     PlainForward = 6
     PlainInverse = 7
     PlainDiscriminator = 8
+    AEGIS = 9 # Local and Global Discriminators
 
     @staticmethod
     def get_enum_model_type(model_type):
@@ -36,6 +36,8 @@ class ModelType(Enum):
                 return ModelType.PlainInverse
             elif model_type == "plaindiscriminator":
                 return ModelType.PlainDiscriminator
+            elif model_type == "aegis":
+                return ModelType.AEGIS
             else:
                 return ModelType.NoModel
         raise ValueError
@@ -86,6 +88,8 @@ class NormType(Enum):
 class EnvSrc(Enum):
     MiniGrid = 0
     ProcGen = 1
+    MuJoCo = 2
+    Atari = 3
 
     @staticmethod
     def get_enum_env_src(env_src):
@@ -97,4 +101,8 @@ class EnvSrc(Enum):
                 return EnvSrc.MiniGrid
             if env_src == 'procgen':
                 return EnvSrc.ProcGen
+            if env_src == 'mujoco':
+                return EnvSrc.MuJoCo
+            if env_src == 'atari':
+                return EnvSrc.Atari
         raise ValueError

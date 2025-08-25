@@ -269,3 +269,5 @@ class DiscriminatorOutputHeads(nn.Module):
         one_hot_act = F.one_hot(curr_act, num_classes=self.action_num)
         inputs = th.cat([curr_emb, next_emb, one_hot_act], dim=1)
         return self.nn(inputs)
+
+# Maybe add AEGIS output heads here too

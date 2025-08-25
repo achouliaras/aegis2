@@ -42,10 +42,11 @@ class TrainingConfig():
         self.project_name = env_name if project_name is None else project_name
 
     def init_logger(self):
+        
         if self.group_name is not None:
             self.wandb_run = wandb.init(
                 name=f'run-id-{self.run_id}',
-                entity='abcde-project',  # your project name on wandb
+                entity='dais-lab-university-college-dublin',  # your project name on wandb 
                 project=self.project_name,
                 group=self.group_name,
                 settings=wandb.Settings(start_method="fork"),
@@ -55,10 +56,10 @@ class TrainingConfig():
             )
             self.use_wandb = True
         else:
-            self.use_wandb = False
             self.wandb_run = None
+            self.use_wandb = False
 
-        self.log_dir = os.path.join(self.log_dir, self.env_name, self.int_rew_source, str(self.run_id), self.start_datetime)
+        self.log_dir = os.path.join(self.log_dir, self.env_name, self.int_rew_source, self.group_name, str(self.run_id))
         os.makedirs(self.log_dir, exist_ok=True)
         if self.write_local_logs:
             self.local_logger = LocalLogger(self.log_dir)
@@ -181,9 +182,9 @@ class TrainingConfig():
         self.model_gru_norm = NormType.get_enum_norm_type(self.model_gru_norm)
 
         self.int_rew_source = ModelType.get_enum_model_type(self.int_rew_source)
-        if self.int_rew_source == ModelType.DEIR and not self.use_model_rnn:
-            print('\nWARNING: Running DEIR without RNNs\n')
-        if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
+        if self.int_rew_source in [ModelType.DEIR, ModelType.AEGIS] and not self.use_model_rnn:
+            print('\nWARNING: Running DEIR or Aegis without RNNs\n')
+        if self.int_rew_source in [ModelType.AEGIS, ModelType.DEIR, ModelType.PlainDiscriminator]:
             assert self.n_steps * self.num_processes >= self.batch_size
 
     def get_cnn_kwargs(self, cnn_activation_fn=nn.ReLU):
