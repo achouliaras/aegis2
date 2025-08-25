@@ -39,6 +39,8 @@ class PPORolloutBuffer(BaseBuffer):
         int_rew_momentum: Optional[float] = None,
         use_status_predictor: int = 0,
         curr_timesteps: int = 0,
+        total_timesteps: int = 1e6,
+        pretrain_percentage: float = 0.0,
     ):
         if isinstance(observation_space, Dict):
             observation_space = list(observation_space.values())[0]
@@ -68,7 +70,11 @@ class PPORolloutBuffer(BaseBuffer):
         self.int_rew_momentum = int_rew_momentum
         self.int_rew_stats = RunningMeanStd(momentum=self.int_rew_momentum)
         self.advantage_stats = RunningMeanStd(momentum=self.adv_momentum)
+        
         self.curr_timesteps = curr_timesteps
+        self.total_steps = total_timesteps
+        self.pretrain_percentage = pretrain_percentage
+
         self.generator_ready = False
         self.reset()
 
@@ -114,16 +120,8 @@ class PPORolloutBuffer(BaseBuffer):
             self.intrinsic_rewards = np.clip(self.intrinsic_rewards, -self.int_rew_clip, self.int_rew_clip)
 
     def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray) -> None:
-        # Rescale extrinisc rewards
-        # self.rewards *= self.ext_rew_coef
-        
         # Rescale extrinsic rewards based on pretraining/training phase
-        if self.curr_timesteps < self.total_steps*self.pretrain_frac:
-           self.rewards *= self.ext_rew_pretrain_coef
-        else:
-          self.rewards *= self.ext_rew_coef
-
-
+        self.rewards *= self.get_curr_ext_rew_coef()
 
         # Convert to numpy
         last_values = last_values.clone().cpu().numpy().flatten()
@@ -274,3 +272,10 @@ class PPORolloutBuffer(BaseBuffer):
 
     def update_curr_timesteps(self, curr_timesteps: int) -> None:
         self.curr_timesteps = curr_timesteps
+    
+    def get_curr_ext_rew_coef(self) -> float:
+        # Get extrinsic rewards coef based on pretraining/training phase
+        if self.pretrain_percentage > 0 and self.curr_timesteps < self.total_steps*self.pretrain_percentage:
+           return self.ext_rew_pretrain_coef
+        else:
+          return self.ext_rew_coef

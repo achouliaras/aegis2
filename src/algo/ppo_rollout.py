@@ -115,6 +115,9 @@ class PPORollout(BaseAlgorithm):
         self.log_explored_states = log_explored_states
         self.local_logger = local_logger
         self.use_wandb = use_wandb
+        
+        self.total_timesteps = policy_kwargs['total_timesteps']
+        self.pretrain_percentage = policy_kwargs['pretrain_percentage']
 
         if _init_setup_model:
             self._setup_model()
@@ -153,7 +156,9 @@ class PPORollout(BaseAlgorithm):
             gru_layers=self.policy.gru_layers,
             int_rew_momentum=self.int_rew_momentum,
             use_status_predictor=self.policy.use_status_predictor,
-            curr_timesteps = self.num_timesteps
+            curr_timesteps = self.num_timesteps,
+            total_timesteps = self.total_timesteps,
+            pretrain_percentage = self.pretrain_percentage
         )
 
 
@@ -402,6 +407,7 @@ class PPORollout(BaseAlgorithm):
                 "time/fps": int(self.num_timesteps / (time.time() - self.start_time)),
                 "time/time_elapsed": int(time.time() - self.start_time),
                 "time/total_timesteps": self.num_timesteps,
+                "rollout/ext_rew_coef": self.ppo_rollout_buffer.get_curr_ext_rew_coef(),
                 "rollout/ep_rew_mean": self.rollout_sum_rewards / (self.rollout_done_episodes + 1e-8),
                 "rollout/ep_len_mean": self.rollout_done_episode_steps / (self.rollout_done_episodes + 1e-8),
                 # unique states / positions
