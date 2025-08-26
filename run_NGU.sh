@@ -8,6 +8,7 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --int_rew_source=NGU \
     --env_source=minigrid \
     --game_name=DoorKey-8x8 \
+    --features_dim=128 \
     --int_rew_coef=1e-3 \
     --int_rew_momentum=0.0
 done
@@ -26,6 +27,7 @@ for env in "${arr[@]}"; do
       --int_rew_source=NGU \
       --env_source=minigrid \
       --game_name=$env \
+      --features_dim=128 \
       --int_rew_coef=1e-3 \
       --int_rew_momentum=0.0
   done
@@ -39,6 +41,7 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --int_rew_source=NGU \
     --env_source=minigrid \
     --game_name=KeyCorridorS6R3 \
+    --features_dim=128 \
     --int_rew_coef=1e-3 \
     --int_rew_momentum=0.0
 done

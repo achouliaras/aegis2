@@ -8,8 +8,9 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --int_rew_source=RND \
     --env_source=minigrid \
     --game_name=DoorKey-8x8 \
+    --features_dim=128 \
     --int_rew_coef=3e-3 \
-    --rnd_err_norm=0.0
+    --rnd_err_norm=0
 done
 
 declare -a arr=("DoorKey-16x16" 
@@ -26,8 +27,9 @@ for env in "${arr[@]}"; do
       --int_rew_source=RND \
       --env_source=minigrid \
       --game_name=$env \
+      --features_dim=128 \
       --int_rew_coef=3e-3 \
-      --rnd_err_norm=0.0
+      --rnd_err_norm=0
   done
 done
 
@@ -39,6 +41,7 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --int_rew_source=RND \
     --env_source=minigrid \
     --game_name=KeyCorridorS6R3 \
+    --features_dim=128 \
     --int_rew_coef=3e-3 \
-    --rnd_err_norm=0.0
+    --rnd_err_norm=0
 done
