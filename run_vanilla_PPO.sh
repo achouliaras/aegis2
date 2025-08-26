@@ -7,7 +7,11 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --total_steps=1000000 \
     --int_rew_source=NoModel \
     --env_source=minigrid \
-    --game_name=DoorKey-8x8
+    --game_name=DoorKey-8x8 \
+    --features_dim=64 \
+    --model_features_dim=64 \
+    --latents_dim=64 \
+    --model_latents_dim=64
 done
 
 declare -a arr=("DoorKey-16x16" 
@@ -23,7 +27,11 @@ for env in "${arr[@]}"; do
       --total_steps=2000000 \
       --int_rew_source=NoModel \
       --env_source=minigrid \
-      --game_name=$env
+      --game_name=$env \
+      --features_dim=64 \
+      --model_features_dim=64 \
+      --latents_dim=64 \
+      --model_latents_dim=64
   done
 done
 
@@ -34,5 +42,9 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --total_steps=5000000 \
     --int_rew_source=NoModel \
     --env_source=minigrid \
-    --game_name=KeyCorridorS6R3
+    --game_name=KeyCorridorS6R3 \
+    --features_dim=64 \
+    --model_features_dim=64 \
+    --latents_dim=64 \
+    --model_latents_dim=64
 done

@@ -8,6 +8,10 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --int_rew_source=ICM \
     --env_source=minigrid \
     --game_name=DoorKey-8x8 \
+    --features_dim=64 \
+    --model_features_dim=64 \
+    --latents_dim=64 \
+    --model_latents_dim=64 \
     --int_rew_coef=1e-2
 done
 
@@ -25,6 +29,10 @@ for env in "${arr[@]}"; do
       --int_rew_source=ICM \
       --env_source=minigrid \
       --game_name=$env \
+      --features_dim=64 \
+      --model_features_dim=64 \
+      --latents_dim=64 \
+      --model_latents_dim=64 \
       --int_rew_coef=1e-2
   done
 done
@@ -37,5 +45,9 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
     --int_rew_source=ICM \
     --env_source=minigrid \
     --game_name=KeyCorridorS6R3 \
+    --features_dim=64 \
+    --model_features_dim=64 \
+    --latents_dim=64 \
+    --model_latents_dim=64 \
     --int_rew_coef=1e-2
 done
