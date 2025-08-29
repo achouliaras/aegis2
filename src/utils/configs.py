@@ -45,10 +45,10 @@ class TrainingConfig():
         
         if self.group_name is not None:
             self.wandb_run = wandb.init(
-                name=f'run-id-{self.run_id}',
+                name=f'{self.int_rew_source}-run-id-{self.run_id}',
                 entity='dais-lab-university-college-dublin',  # your project name on wandb 
                 project=self.project_name,
-                group=self.group_name,
+                group=f'{self.group_name}',
                 settings=wandb.Settings(start_method="fork"),
                 sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
                 monitor_gym=True,  # auto-upload the videos of agents playing the game

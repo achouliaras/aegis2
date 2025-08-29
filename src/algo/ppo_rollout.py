@@ -431,6 +431,7 @@ class PPORollout(BaseAlgorithm):
             else:
                 log_data.update({
                     "rollout/ep_info_rew_mean": 0.0,
+                    "rollout/ep_info_len_mean": np.nan,
                 })
 
             if self.int_rew_coef > 0:
