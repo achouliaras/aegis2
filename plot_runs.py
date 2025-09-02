@@ -127,10 +127,13 @@ def plot_algorithms_for_env(
 if __name__ == "__main__":
     envs = ["MiniGrid-DoorKey-8x8-v0", 
             "MiniGrid-DoorKey-16x16-v0", 
-            "MiniGrid-FourRooms-v0", 
+            "MiniGrid-FourRooms-v0",
+            "MultiRoom-N4-S5-v0", 
             "MiniGrid-MultiRoom-N6-v0", 
-            "MiniGrid-KeyCorridorS6R3-v0"]
-    modes = ["NoPreTrain"]
+            "KeyCorridorS4R3-v0",
+            "MiniGrid-KeyCorridorS6R3-v0",
+            "ObstructedMaze-Full-V3-v0"]
+    modes = ["NoPreTrain", "QuarterPreTrain", "HalfPreTrain" "ThreeQuarterPreTrain"]
     algos_to_compare = ["NoModel", "ICM", "RND", "NGU", "NovelD", "DEIR"]     # this list is passed INTO the function
 
     for env in envs:
