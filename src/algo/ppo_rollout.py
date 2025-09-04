@@ -211,12 +211,14 @@ class PPORollout(BaseAlgorithm):
             self.global_open_doors = np.zeros(self.n_envs, dtype=np.int32)
             self.curr_key_status = np.zeros(self.n_envs, dtype=np.float32)
             self.curr_door_status = np.zeros(self.n_envs, dtype=np.float32)
+            self.curr_agent_pos = np.zeros((self.n_envs, 2), dtype=np.float32)
             self.curr_target_dists = np.zeros((self.n_envs, 3), dtype=np.float32)
         else:
             self.global_has_keys = None
             self.global_open_doors = None
             self.curr_key_status = None
             self.curr_door_status = None
+            self.curr_agent_pos = None
             self.curr_target_dists = None
 
         self.episodic_obs_emb_history = [None for _ in range(self.n_envs)]
@@ -225,10 +227,14 @@ class PPORollout(BaseAlgorithm):
         if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
             self.policy.int_rew_model.init_obs_queue(self._last_obs)
 
-        if self.int_rew_source in [ModelType.AEGIS]:
-            self.policy.int_rew_model.init_obs_queue(self._last_obs, queue="local") # Local queue resets
-            # Global queue doesn't reset
+        if self.int_rew_source in [ModelType.AEGISV2]:
+            self.policy.int_rew_model.init_obs_queue(self._last_obs)
+            self.policy.int_rew_model.init_novel_experience_memory(self._last_obs)
 
+        if self.int_rew_source in [ModelType.AEGIS]:
+            last_obs_tensor = obs_as_tensor(self._last_obs, self.device)
+            self.policy.int_rew_model.init_novel_experience_memory(last_obs_tensor, self.curr_key_status, self.curr_door_status,self.curr_agent_pos)
+            
         def float_zeros(tensor_shape):
             return th.zeros(tensor_shape, device=self.device, dtype=th.float32)
 
@@ -555,8 +561,29 @@ class PPORollout(BaseAlgorithm):
                 door_status_tensor = None
                 target_dists_tensor = None
 
-        # AEGIS / DEIR / Plain discriminator model
-        if self.int_rew_source in [ModelType.AEGIS, ModelType.DEIR, ModelType.PlainDiscriminator]:
+        # AEGIS
+        if self.int_rew_source == ModelType.AEGIS:
+            intrinsic_rewards, next_embs, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
+                curr_obs=curr_obs_tensor,
+                next_obs=next_obs_tensor,
+                last_mems=last_model_mem_tensor,
+                obs_history=self.episodic_obs_emb_history,
+                curr_act=curr_act_tensor,
+                curr_dones=done_tensor,
+                key_status=key_status_tensor,
+                door_status=door_status_tensor,
+                target_dists=target_dists_tensor,
+                stats_logger=self.rollout_stats
+            )
+            self.policy.int_rew_model.update_experience_memory(
+                iteration=self.iteration,
+                new_obs=new_obs,
+                new_embs=next_embs,
+                last_mems=last_model_mem_tensor,
+                stats_logger=self.rollout_stats
+            )
+        # AEGISV2 / DEIR / Plain discriminator model
+        elif self.int_rew_source in [ModelType.AEGISV2, ModelType.DEIR, ModelType.PlainDiscriminator]:
             intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
                 curr_obs=curr_obs_tensor,
                 next_obs=next_obs_tensor,
@@ -575,7 +602,7 @@ class PPORollout(BaseAlgorithm):
                     new_obs=new_obs,
                     stats_logger=self.rollout_stats
                 )
-            elif self.int_rew_source in [ModelType.AEGIS]:
+            elif self.int_rew_source in [ModelType.AEGISV2]:
                 self.policy.int_rew_model.update_obs_queue(
                     iteration=self.iteration,
                     intrinsic_rewards=intrinsic_rewards,
@@ -583,7 +610,6 @@ class PPORollout(BaseAlgorithm):
                     new_obs=new_obs,
                     stats_logger=self.rollout_stats
                 )
-
         # Plain forward / inverse model
         elif self.int_rew_source in [ModelType.PlainForward, ModelType.PlainInverse]:
             intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(

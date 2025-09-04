@@ -7,6 +7,7 @@ from src.algo.intrinsic_rewards.ngu import NGUModel
 from src.algo.intrinsic_rewards.noveld import NovelDModel
 from src.algo.intrinsic_rewards.plain_forward import PlainForwardModel
 from src.algo.intrinsic_rewards.plain_inverse import PlainInverseModel
+from algo.intrinsic_rewards.aegis import AEGIS
 from src.algo.intrinsic_rewards.rnd import RNDModel
 from src.algo.common_models.gru_cell import CustomGRUCell
 from src.algo.common_models.mlps import *
@@ -75,6 +76,9 @@ class PPOModel(ActorCriticCnnPolicy):
         rnd_use_policy_emb: int = 0,
         dsc_obs_queue_len: int = 0,
         log_dsc_verbose: int = 0,
+        aegis_nov_exp_mem_capacity: int = 0,
+        aegis_knn_k: int = 5,
+        aegis_dst_momentum: float = -1,
     ):
         self.run_id = run_id
         self.n_envs = n_envs
@@ -115,6 +119,7 @@ class PPOModel(ActorCriticCnnPolicy):
         self.model_cnn_features_extractor_kwargs = model_cnn_features_extractor_kwargs
         self.dsc_obs_queue_len = dsc_obs_queue_len
         self.log_dsc_verbose = log_dsc_verbose
+        self.aegis_nov_exp_mem_capacity = aegis_nov_exp_mem_capacity
 
         if isinstance(observation_space, gym.spaces.Dict):
             observation_space = observation_space["rgb"]
@@ -182,7 +187,15 @@ class PPOModel(ActorCriticCnnPolicy):
             use_status_predictor=self.use_status_predictor,
         )
 
-        if self.int_rew_source in [ModelType.AEGIS, ModelType.DEIR, ModelType.PlainDiscriminator]:
+        if self.int_rew_source == ModelType.AEGIS:
+            self.int_rew_model = AEGIS(
+                aegis_nem_capacity=aegis_nov_exp_mem_capacity,
+                **int_rew_model_kwargs,
+                aegis_knn_k=aegis_knn_k,
+                aegis_dst_momentum= aegis_dst_momentum,
+            )
+            
+        if self.int_rew_source in [ModelType.AEGISV2, ModelType.DEIR, ModelType.PlainDiscriminator]:
             self.int_rew_model = DiscriminatorModel(
                 **int_rew_model_kwargs,
                 obs_rng=np.random.default_rng(seed=self.run_id + 131),

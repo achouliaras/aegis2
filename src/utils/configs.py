@@ -59,7 +59,12 @@ class TrainingConfig():
             self.wandb_run = None
             self.use_wandb = False
 
-        self.log_dir = os.path.join(self.log_dir, self.env_name, self.int_rew_source, self.group_name, str(self.run_id))
+        if self.group_name is None:
+            group_name='test'
+        else:
+            group_name=self.group_name
+
+        self.log_dir = os.path.join(self.log_dir, self.env_name, self.int_rew_source, group_name, str(self.run_id))
         os.makedirs(self.log_dir, exist_ok=True)
         if self.write_local_logs:
             self.local_logger = LocalLogger(self.log_dir)

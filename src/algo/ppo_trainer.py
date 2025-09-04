@@ -168,108 +168,153 @@ class PPOTrainer(PPORollout):
         loss = None
         continue_training = True
 
-        for epoch in range(max(self.n_epochs, self.model_n_epochs)):
+        # TODO: ADD alternating updates for AEGIS
+        # Init data dept queues
+        uses_aegis = self.policy.int_rew_source == ModelType.AEGIS
+        epochs = max(self.n_epochs, self.model_n_epochs)
+
+        if uses_aegis: 
+            epochs = self.n_epochs + self.model_n_epochs
+            rew_model_updates = 0
+            ppo_updates = 0
+            rew_model_stack = []
+            ppo_stack = []
+            batch_num = 0
+            update_frequency = 1
+
+        for epoch in range(epochs):
             for rollout_data in self.ppo_rollout_buffer.get(self.batch_size):
+                batch_num +=1
+                # TODO: ADD alternating updates for AEGIS
                 # Train intrinsic reward models
-                if epoch < self.model_n_epochs:
+                if not uses_aegis and epoch < self.model_n_epochs:
                     if self.policy.int_rew_source != ModelType.NoModel:
                         self.policy.int_rew_model.optimize(
                             rollout_data=rollout_data,
                             stats_logger=self.training_stats
                         )
+                elif uses_aegis and rew_model_updates < self.model_n_epochs and (batch_num//update_frequency) % 2 == 0:
+                        rew_model_stack.append(rollout_data)
+                        ppo_stack.append(rollout_data)
+                        for data in rew_model_stack:
+                            self.policy.int_rew_model.optimize(
+                                rollout_data=data,
+                                stats_logger=self.training_stats
+                            )
+                        rew_model_stack.clear()
+                        print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_updates+1} time(s)====")
 
+                # TODO: ADD alternating updates for AEGIS
                 # Training for policy and value nets
-                if epoch < self.n_epochs:
-                    actions = rollout_data.actions
-                    if isinstance(self.action_space, spaces.Discrete):
-                        # Convert discrete action from float to long
-                        actions = rollout_data.actions.long().flatten()
-
-                    # Re-sample the noise matrix because the log_std has changed
-                    # if that line is commented (as in SAC)
-                    if self.use_sde:
-                        self.policy.reset_noise(self.batch_size)
-
-                    values, log_prob, entropy, memories = \
-                        self.policy.evaluate_policy(
-                            rollout_data.observations,
-                            actions,
-                            rollout_data.last_policy_mems,
-                        )
-                    values = values.flatten()
-
-                    # Normalize advantage
-                    advantages = rollout_data.advantages
-                    # Normalize Advangages per mini-batch
-                    if self.adv_norm == 1:
-                        advantages = (advantages - advantages.mean()) / (advantages.std() + self.adv_eps)
-                    # ratio between old and new policy, should be one at the first iteration
-                    ratio = th.exp(log_prob - rollout_data.old_log_prob)
-                    # clipped surrogate loss
-                    policy_loss_1 = advantages * ratio
-                    policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-                    policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
-                    # Logging
-                    clip_fraction = th.mean((th.abs(ratio - 1) > clip_range).float()).item()
-
-                    if self.clip_range_vf is None:
-                        # No clipping
-                        values_pred = values
-                    else:
-                        # Clip the different between old and new value
-                        # NOTE: this depends on the reward scaling
-                        values_pred = rollout_data.old_values + th.clamp(
-                            values - rollout_data.old_values, -clip_range_vf, clip_range_vf
-                        )
-                    # Value loss using the TD(gae_lambda) target
-                    value_loss = F.mse_loss(rollout_data.returns, values_pred)
-
-                    # Entropy loss favor exploration
-                    if entropy is None:
-                        # Approximate entropy when no analytical form
-                        entropy_loss = -th.mean(-log_prob)
-                    else:
-                        entropy_loss = -th.mean(entropy)
-
-                    # Policy & Value Losses
-                    loss = self.pg_coef * policy_loss + \
-                           self.ent_coef * entropy_loss + \
-                           self.vf_coef * value_loss
-
-                    with th.no_grad():
-                        log_ratio = log_prob - rollout_data.old_log_prob
-                        approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
-
-                    if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
-                        continue_training = False
-                        if self.verbose >= 1:
-                            print(f"Early stopping at step {epoch} due to reaching max kl: {approx_kl_div:.2f}")
-                        break
-
-                    # Logging
-                    self.training_stats.add(
-                        policy_loss=policy_loss,
-                        value_loss=value_loss,
-                        entropy_loss=entropy_loss,
-                        adv=advantages.mean(),
-                        adv_std=advantages.std(),
-                        clip_fraction=clip_fraction,
-                        approx_kl_div=approx_kl_div,
-                    )
-
-                    # Optimization step
-                    self.policy.optimizer.zero_grad()
-                    loss.backward()
-                    th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-                    self.policy.optimizer.step()
-
-                    # END OF A TRAINING BATCH
-
-                    if not continue_training:
-                        break
+                if not uses_aegis and epoch < self.n_epochs:
+                    loss, continue_training = self.ppo_update(epoch, rollout_data, clip_range, clip_range_vf)
+                elif uses_aegis and ppo_updates < self.n_epochs and (batch_num//update_frequency) % 2 != 0:
+                    rew_model_stack.append(rollout_data)
+                    ppo_stack.append(rollout_data)
+                    for data in ppo_stack:
+                        loss, continue_training_temp= self.ppo_update(epoch, data, clip_range, clip_range_vf)  
+                        continue_training = continue_training or continue_training_temp
+                    ppo_stack.clear() 
+                    print(f"==== Epoch {epoch} Batch {batch_num} ====     PPO TRAINED FOR {ppo_updates+1} time(s)====")         
+                # END OF A TRAINING BATCH
+                if not continue_training:
+                    break
+            if uses_aegis: 
+                if rew_model_updates < self.model_n_epochs:
+                    rew_model_updates +=1
+                    # Update embeddings and novelty scores in novel experience memory
+                    self.policy.int_rew_model.update_embeddings()
+                if ppo_updates < self.n_epochs:
+                    ppo_updates +=1
+            
         return loss
 
+    def ppo_update(self, epoch, rollout_data, clip_range, clip_range_vf):
+        actions = rollout_data.actions
+        if isinstance(self.action_space, spaces.Discrete):
+            # Convert discrete action from float to long
+            actions = rollout_data.actions.long().flatten()
 
+        # Re-sample the noise matrix because the log_std has changed
+        # if that line is commented (as in SAC)
+        if self.use_sde:
+            self.policy.reset_noise(self.batch_size)
+
+        values, log_prob, entropy, memories = \
+            self.policy.evaluate_policy(
+                rollout_data.observations,
+                actions,
+                rollout_data.last_policy_mems,
+            )
+        values = values.flatten()
+
+        # Normalize advantage
+        advantages = rollout_data.advantages
+        # Normalize Advangages per mini-batch
+        if self.adv_norm == 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + self.adv_eps)
+        # ratio between old and new policy, should be one at the first iteration
+        ratio = th.exp(log_prob - rollout_data.old_log_prob)
+        # clipped surrogate loss
+        policy_loss_1 = advantages * ratio
+        policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+        policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
+        # Logging
+        clip_fraction = th.mean((th.abs(ratio - 1) > clip_range).float()).item()
+
+        if self.clip_range_vf is None:
+            # No clipping
+            values_pred = values
+        else:
+            # Clip the different between old and new value
+            # NOTE: this depends on the reward scaling
+            values_pred = rollout_data.old_values + th.clamp(
+                values - rollout_data.old_values, -clip_range_vf, clip_range_vf
+            )
+        # Value loss using the TD(gae_lambda) target
+        value_loss = F.mse_loss(rollout_data.returns, values_pred)
+
+        # Entropy loss favor exploration
+        if entropy is None:
+            # Approximate entropy when no analytical form
+            entropy_loss = -th.mean(-log_prob)
+        else:
+            entropy_loss = -th.mean(entropy)
+
+        # Policy & Value Losses
+        loss = self.pg_coef * policy_loss + \
+                self.ent_coef * entropy_loss + \
+                self.vf_coef * value_loss
+
+        with th.no_grad():
+            log_ratio = log_prob - rollout_data.old_log_prob
+            approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
+
+        if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
+            continue_training = False
+            if self.verbose >= 1:
+                print(f"Early stopping at step {epoch} due to reaching max kl: {approx_kl_div:.2f}")
+            return continue_training
+
+        # Logging
+        self.training_stats.add(
+            policy_loss=policy_loss,
+            value_loss=value_loss,
+            entropy_loss=entropy_loss,
+            adv=advantages.mean(),
+            adv_std=advantages.std(),
+            clip_fraction=clip_fraction,
+            approx_kl_div=approx_kl_div,
+        )
+
+        # Optimization step
+        self.policy.optimizer.zero_grad()
+        loss.backward()
+        th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+        self.policy.optimizer.step()
+        continue_training = True
+        return loss, continue_training
+            
     def train(self) -> None:
         # Update optimizer learning rate
         self._update_learning_rate(self.policy.optimizer)

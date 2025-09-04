@@ -12,7 +12,8 @@ class ModelType(Enum):
     PlainForward = 6
     PlainInverse = 7
     PlainDiscriminator = 8
-    AEGIS = 9 # Local and Global Discriminators
+    AEGIS = 9 # Local latent MDP model
+    AEGISV2 = 10 # Local and Global Discriminators
 
     @staticmethod
     def get_enum_model_type(model_type):

@@ -183,10 +183,10 @@ class NGUModel(IntrinsicRewardBaseModel):
                 # Compute the Kernel values between the embedding f (x_t) and its neighbours N_k
                 kernel_values = 0.0001 / (normalized_dists + 0.0001)
                 # Compute the similarity between the embedding f (x_t) and its neighbours N_k
-                simlarity = np.sqrt(kernel_values.sum()) + 0.001
+                similarity = np.sqrt(kernel_values.sum()) + 0.001
                 # Compute the episodic intrinsic reward at time t
-                if simlarity <= 8:
-                    episodic_reward += 1 / simlarity
+                if similarity <= 8:
+                    episodic_reward += 1 / similarity
 
             if self.ngu_use_rnd and ngu_lifelong_rewards is not None:
                 L = 5.0  # L is a chosen maximum reward scaling (default: 5)
