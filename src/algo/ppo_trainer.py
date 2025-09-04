@@ -175,8 +175,8 @@ class PPOTrainer(PPORollout):
 
         if uses_aegis: 
             epochs = self.n_epochs + self.model_n_epochs
-            rew_model_updates = 0
-            ppo_updates = 0
+            rew_model_epochs = 0
+            ppo_epochs = 0
             rew_model_stack = []
             ppo_stack = []
             batch_num = 0
@@ -193,7 +193,7 @@ class PPOTrainer(PPORollout):
                             rollout_data=rollout_data,
                             stats_logger=self.training_stats
                         )
-                elif uses_aegis and rew_model_updates < self.model_n_epochs and (batch_num//update_frequency) % 2 == 0:
+                elif uses_aegis and rew_model_epochs < self.model_n_epochs and (batch_num//update_frequency) % 2 == 0:
                         rew_model_stack.append(rollout_data)
                         ppo_stack.append(rollout_data)
                         for data in rew_model_stack:
@@ -201,32 +201,31 @@ class PPOTrainer(PPORollout):
                                 rollout_data=data,
                                 stats_logger=self.training_stats
                             )
+                            print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_epochs+1} epoch(s)====")
                         rew_model_stack.clear()
-                        print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_updates+1} time(s)====")
-
+                        
                 # TODO: ADD alternating updates for AEGIS
                 # Training for policy and value nets
                 if not uses_aegis and epoch < self.n_epochs:
                     loss, continue_training = self.ppo_update(epoch, rollout_data, clip_range, clip_range_vf)
-                elif uses_aegis and ppo_updates < self.n_epochs and (batch_num//update_frequency) % 2 != 0:
+                elif uses_aegis and ppo_epochs < self.n_epochs and (batch_num//update_frequency) % 2 != 0:
                     rew_model_stack.append(rollout_data)
                     ppo_stack.append(rollout_data)
                     for data in ppo_stack:
                         loss, continue_training_temp= self.ppo_update(epoch, data, clip_range, clip_range_vf)  
                         continue_training = continue_training or continue_training_temp
+                        print(f"==== Epoch {epoch} Batch {batch_num} ====     PPO TRAINED FOR {ppo_epochs+1} time(s)====")         
                     ppo_stack.clear() 
-                    print(f"==== Epoch {epoch} Batch {batch_num} ====     PPO TRAINED FOR {ppo_updates+1} time(s)====")         
                 # END OF A TRAINING BATCH
                 if not continue_training:
                     break
             if uses_aegis: 
-                if rew_model_updates < self.model_n_epochs:
-                    rew_model_updates +=1
+                if rew_model_epochs < self.model_n_epochs:
+                    rew_model_epochs +=1
                     # Update embeddings and novelty scores in novel experience memory
                     self.policy.int_rew_model.update_embeddings()
-                if ppo_updates < self.n_epochs:
-                    ppo_updates +=1
-            
+                if ppo_epochs < self.n_epochs:
+                    ppo_epochs +=1
         return loss
 
     def ppo_update(self, epoch, rollout_data, clip_range, clip_range_vf):
