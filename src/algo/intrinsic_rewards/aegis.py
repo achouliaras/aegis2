@@ -37,7 +37,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         # Method-specific params
         aegis_knn_k: int = 5,
         aegis_nem_capacity: int = 512,
-        aegis_dst_momentum: float = 0.997,
+        aegis_dst_momentum: float = 0.9,
         aegis_l_coef: float = 0.5,
         aegis_g_coef: float = 0.5,
         aegis_novelty_alpha: float = 0.5,
@@ -157,20 +157,28 @@ class AEGIS(IntrinsicRewardBaseModel):
             # Compute the embedding distance between the new observation and all observations in the novel experience memory
             dists = self.calc_euclidean_dists(
                 th.tensor(self.obs_embs_queue[:self.obs_queue_filled], dtype=th.float32, device=obs_embs.device),
-                obs_embs
+                obs_embs[-1]
             ) ** 2
             dists = dists.clone().cpu().numpy()
             # Compute the k-nearest neighbours of the new observation in the memory
             knn_dists = np.sort(dists)[:self.aegis_knn_k]
             # Update the moving average of the k-nearest neighbour distances
-            self.aegis_moving_avg_dists.update(knn_dists)
+            
+            # print(f"===KNN DISTS: {knn_dists}")
+            # self.aegis_moving_avg_dists.update(knn_dists)
+            # print(f"===MOV AVG DISTS: {self.aegis_moving_avg_dists.mean}")
             # Normalize the distances with the moving average
-            norm_knn_dists = knn_dists / (self.aegis_moving_avg_dists.mean + 1e-5)
+            # norm_knn_dists = knn_dists / (self.aegis_moving_avg_dists.mean + 1e-5)
+            norm_knn_dists = knn_dists
+            # print(f"===NORM KNN DISTS: {norm_knn_dists}")
+            # input()
+
             # Cluster the normalized distances. i.e. they become 0 if too small and 0k is a list of k zeros
-            norm_knn_dists = np.maximum(norm_knn_dists - 0.008, np.zeros_like(knn_dists))
+            norm_knn_dists = np.maximum(norm_knn_dists - 0.01, np.zeros_like(knn_dists))
             # Compute the Kernel values between the embedding f (x_t) and its neighbours N_k
             similarity = 0.0001 / (norm_knn_dists.mean() + 0.0001)
             novelty_score = 1 - similarity
+            # print(f"=== NOV {novelty_score} ==== SIM {similarity}")
         return novelty_score, similarity
         
 
@@ -216,7 +224,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         curr_act = th.zeros((n_envs, get_action_dim(self.action_space)), dtype=th.long if isinstance(self.action_space, spaces.Discrete) else th.float32)
 
         with th.no_grad():
-            _, _, _, _, _, _, _, _, _, initial_embs, _, init_mems = \
+            _, _, _, _, _, _, _, _, _, _, initial_embs, _, init_mems = \
                 self.forward(
                     curr_obs=initial_obs, 
                     next_obs=initial_obs, 
@@ -241,7 +249,7 @@ class AEGIS(IntrinsicRewardBaseModel):
                 queue_obs_embs = th.tensor(self.obs_embs_queue[:self.obs_queue_filled],
                                     dtype=th.float32)
                 for i in range(self.obs_queue_filled):
-                    novelty_score, _ = self.calculate_novelty_score(queue_obs_embs[i])
+                    novelty_score, _ = self.calculate_novelty_score(queue_obs_embs[i].view(1, -1))
                     self.novelty_scores[i] = novelty_score
 
 
@@ -305,7 +313,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         self._get_status_prediction_losses(
             curr_embs, curr_key_status, curr_door_status, curr_agent_pos
         )
-        return lmdp_loss, \
+        return lmdp_loss, inv_losses, \
             key_loss, door_loss, pos_loss, \
             key_dist, door_dist, goal_dist, \
             curr_cnn_embs, next_cnn_embs, \
@@ -317,7 +325,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         key_status, door_status, target_dists, stats_logger
     ):
         with th.no_grad():
-            lmdp_loss, \
+            lmdp_loss, inv_losses, \
             key_loss, door_loss, pos_loss, \
             key_dist, door_dist, goal_dist, \
             _, _, \
@@ -327,11 +335,11 @@ class AEGIS(IntrinsicRewardBaseModel):
                     curr_act, curr_dones,
                     key_status, door_status, target_dists
                 )
-        local_reward = lmdp_loss.clone().cpu().numpy()
+        local_reward = inv_losses.clone().cpu().numpy()
         batch_size = curr_obs.shape[0]
         
         int_rews = np.zeros(batch_size, dtype=np.float32)
-        global_reward = 0.0
+        global_rewards = np.zeros(batch_size, dtype=np.float32)
         for env_id in range(batch_size):
             # Update historical observation embeddings
             curr_emb = curr_embs[env_id].view(1, -1)
@@ -346,27 +354,27 @@ class AEGIS(IntrinsicRewardBaseModel):
                 next_obs_global_novelty, _ = self.calculate_novelty_score(next_emb)
                 curr_novelty = curr_obs_global_novelty
                 next_novelty = next_obs_global_novelty
-                
                 novelty = max(next_novelty - curr_novelty * self.novelty_alpha, self.novelty_beta)
-                
+
+                # Restriction on IRs
                 if env_id not in self.globally_visited_obs:
                     self.globally_visited_obs[env_id] = set()
-                # if curr_dones[env_id]:
-                #     self.globally_visited_obs[env_id].clear()
 
-                obs_hash = tuple(next_obs[env_id].reshape(-1).tolist()) # Might need obs instead of next_obs
+                obs_hash = tuple(next_obs[env_id].reshape(-1).tolist())
                 if obs_hash in self.globally_visited_obs[env_id]:
                     novelty *= 0.0
                 else:
                     self.globally_visited_obs[env_id].add(obs_hash)
-                global_reward += novelty
+                global_rewards[env_id] += novelty
             
-            int_rews[env_id] += self.l_coef*local_reward +self.g_coef*global_reward
-            # print(f"Env {env_id}: Int Rew = {int_rews[env_id]:.4f}, Local Reward = {local_reward:.4f}, Global Reward = {global_reward:.4f}")
+            int_rews[env_id] += self.l_coef*local_reward[env_id] + self.g_coef*global_rewards[env_id]
+            # print(f"\nEnv {env_id}:\n Int Rew = {int_rews[env_id]:.4f},\n Local Reward = {local_reward[env_id]:.4f},\n Global Reward = {global_rewards[env_id]:.4f}\n")
 
         # Logging
         stats_logger.add(
             inv_loss=lmdp_loss,
+            local_reward=local_reward,
+            global_rewards=global_rewards,
             key_loss=key_loss,
             door_loss=door_loss,
             pos_loss=pos_loss,
@@ -391,7 +399,7 @@ class AEGIS(IntrinsicRewardBaseModel):
             curr_door_status = None
             curr_target_dists = None
 
-        loss, \
+        loss, _, \
         key_loss, door_loss, pos_loss, \
         key_dist, door_dist, goal_dist, \
         _, _, _, _, _ = \

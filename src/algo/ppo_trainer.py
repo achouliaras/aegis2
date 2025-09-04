@@ -184,7 +184,8 @@ class PPOTrainer(PPORollout):
 
         for epoch in range(epochs):
             for rollout_data in self.ppo_rollout_buffer.get(self.batch_size):
-                batch_num +=1
+                if uses_aegis: 
+                    batch_num +=1
                 # TODO: ADD alternating updates for AEGIS
                 # Train intrinsic reward models
                 if not uses_aegis and epoch < self.model_n_epochs:
@@ -201,7 +202,7 @@ class PPOTrainer(PPORollout):
                                 rollout_data=data,
                                 stats_logger=self.training_stats
                             )
-                            print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_epochs+1} epoch(s)====")
+                            # print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_epochs+1} epoch(s)====")
                         rew_model_stack.clear()
                         
                 # TODO: ADD alternating updates for AEGIS
@@ -214,7 +215,7 @@ class PPOTrainer(PPORollout):
                     for data in ppo_stack:
                         loss, continue_training_temp= self.ppo_update(epoch, data, clip_range, clip_range_vf)  
                         continue_training = continue_training or continue_training_temp
-                        print(f"==== Epoch {epoch} Batch {batch_num} ====     PPO TRAINED FOR {ppo_epochs+1} time(s)====")         
+                        # print(f"==== Epoch {epoch} Batch {batch_num} ====     PPO TRAINED FOR {ppo_epochs+1} time(s)====")         
                     ppo_stack.clear() 
                 # END OF A TRAINING BATCH
                 if not continue_training:
