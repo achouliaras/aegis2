@@ -227,20 +227,24 @@ class PPORollout(BaseAlgorithm):
         if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
             self.policy.int_rew_model.init_obs_queue(self._last_obs)
 
-        if self.int_rew_source in [ModelType.AEGISV2]:
-            self.policy.int_rew_model.init_obs_queue(self._last_obs)
-            self.policy.int_rew_model.init_novel_experience_memory(self._last_obs)
-
-        if self.int_rew_source in [ModelType.AEGIS]:
-            last_obs_tensor = obs_as_tensor(self._last_obs, self.device)
-            self.policy.int_rew_model.init_novel_experience_memory(last_obs_tensor, self.curr_key_status, self.curr_door_status,self.curr_agent_pos)
-            
         def float_zeros(tensor_shape):
             return th.zeros(tensor_shape, device=self.device, dtype=th.float32)
 
         self._last_policy_mems = float_zeros([self.n_envs, self.policy.gru_layers, self.policy.dim_policy_features])
         self._last_model_mems = float_zeros([self.n_envs, self.policy.gru_layers, self.policy.dim_model_features])
 
+        if self.int_rew_source in [ModelType.AEGISV2]:
+            self.policy.int_rew_model.init_obs_queue(self._last_obs)
+            self.policy.int_rew_model.init_novel_experience_memory(self._last_obs)
+
+        if self.int_rew_source in [ModelType.AEGIS]:
+            last_obs_tensor = obs_as_tensor(self._last_obs, self.device)
+            self.policy.int_rew_model.init_novel_experience_memory(last_obs_tensor, 
+                                                                   self._last_model_mems,
+                                                                   self.curr_key_status, 
+                                                                   self.curr_door_status,
+                                                                   self.curr_agent_pos, 
+                                                                   device=self.device)
 
     def init_on_rollout_start(self):
         # Log statistics data per each rollout

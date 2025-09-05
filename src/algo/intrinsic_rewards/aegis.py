@@ -187,16 +187,19 @@ class AEGIS(IntrinsicRewardBaseModel):
         Update the novel experience memory after generating the intrinsic rewards for
         the current RL rollout. Tries to add one new observation per environment.
         """
-        for env_id in range(new_obs.shape[0]):
+        batch_size = new_obs.shape[0]
+        for env_id in range(batch_size):
             next_obs = new_obs[env_id]
             next_embs = new_embs[env_id]
             mems = last_mems[env_id] if self.use_model_rnn else None
             
             if iteration == 0:
-                self._add_obs(next_obs, next_embs, mems if self.use_model_rnn else None)
+                self._add_obs(next_obs, 
+                              next_embs.clone().cpu().numpy(), 
+                              mems.clone().cpu().numpy() if self.use_model_rnn else None)
                 stats_logger.add(obs_insertions=1)
             else:
-                # Calculate the novelty score of the new observation    
+                # Calculate the novelty score of the new observation
                 novelty_score, similarity = self.calculate_novelty_score(next_embs.view(1, -1))
                 
                 # Eviction strategy: Remove the least novel observation if the memory is full
@@ -208,33 +211,39 @@ class AEGIS(IntrinsicRewardBaseModel):
                     stats_logger.add(obs_evictions=0)
                 # Addition strategy: Add the new observation if the novelty score is positive
                 if novelty_score > 0.0:
-                    self._add_obs(new_obs[env_id], new_embs[env_id], last_mems[env_id] if self.use_model_rnn else None,
-                                  add_pos=obs_queue_add_pos, novelty_score=novelty_score)
+                    self._add_obs(new_obs[env_id], 
+                                  new_embs[env_id].clone().cpu().numpy(), 
+                                  last_mems[env_id].clone().cpu().numpy() if self.use_model_rnn else None,
+                                  add_pos=obs_queue_add_pos, 
+                                  novelty_score=novelty_score)
                     stats_logger.add(obs_insertions=1)
                 else:
                     stats_logger.add(obs_insertions=0)
 
 
-    def init_novel_experience_memory(self, initial_obs, curr_key_status, curr_door_status, curr_agent_pos):
+    def init_novel_experience_memory(self, initial_obs, last_mems, curr_key_status, curr_door_status, curr_agent_pos, device):
         """
         In order to ensure the novel experience memory is not empty on training start
         by adding all observations received at time step 0.
         """
         n_envs = initial_obs.shape[0]
-        curr_act = th.zeros((n_envs, get_action_dim(self.action_space)), dtype=th.long if isinstance(self.action_space, spaces.Discrete) else th.float32)
+        curr_act = th.zeros((n_envs, get_action_dim(self.action_space)), dtype=th.long if isinstance(self.action_space, spaces.Discrete) else th.float32, device=device)
 
         with th.no_grad():
             _, _, _, _, _, _, _, _, _, _, initial_embs, _, init_mems = \
                 self.forward(
                     curr_obs=initial_obs, 
                     next_obs=initial_obs, 
-                    last_mems=th.zeros((n_envs, self.gru_layers, self.model_features_dim) if self.use_model_rnn else None),
+                    last_mems=last_mems,
                     curr_act=curr_act.squeeze(-1),
-                    curr_dones=th.zeros((n_envs,), dtype=th.float32), 
+                    curr_dones=th.zeros((n_envs,), dtype=th.float32, device=device), 
                     curr_key_status=curr_key_status, 
                     curr_door_status=curr_door_status, 
                     curr_agent_pos=curr_agent_pos
                 )
+            initial_obs = initial_obs.clone().cpu().numpy()
+            initial_embs = initial_embs.clone().cpu().numpy()
+            init_mems = init_mems.clone().cpu().numpy()
         
         for i in range(n_envs):
             self._add_obs(initial_obs[i], initial_embs[i], init_mems[i] if self.use_model_rnn else None)
@@ -253,7 +262,7 @@ class AEGIS(IntrinsicRewardBaseModel):
                     self.novelty_scores[i] = novelty_score
 
 
-    def update_embeddings(self):
+    def update_embeddings(self, device):
         """
         Refresh the embeddings and memory states of all observations in the novel experience memory 
         and recalculate their novelty scores
@@ -262,10 +271,10 @@ class AEGIS(IntrinsicRewardBaseModel):
             return
         else:
             with th.no_grad():
-                obs_tensor = th.tensor(self.obs_queue[:self.obs_queue_filled], dtype=th.float32)
-                mems_tensor = th.tensor(self.mem_queue[:self.obs_queue_filled], dtype=th.float32)
+                obs_tensor = th.tensor(self.obs_queue[:self.obs_queue_filled], dtype=th.float32, device=device)
+                mems_tensor = th.tensor(self.mem_queue[:self.obs_queue_filled], dtype=th.float32, device=device)
                 
-                _, new_embs, new_mems = self._encode_obs(obs_tensor, mems_tensor, device=obs_tensor.device)                
+                _, new_embs, new_mems = self._encode_obs(obs_tensor, mems_tensor, device=device)                
                 
             self.obs_embs_queue[:self.obs_queue_filled] = new_embs.clone().cpu().numpy()
             self.mem_queue[:self.obs_queue_filled] = new_mems.clone().cpu().numpy()
@@ -446,6 +455,8 @@ class AEGIS(IntrinsicRewardBaseModel):
         T, N, D = embeddings.shape
         z = F.normalize(embeddings, dim=-1)
 
+        device = z.device
+        
         # Flatten to (T*N, D)
         z_flat = z.reshape(T * N, D)
 
@@ -453,8 +464,8 @@ class AEGIS(IntrinsicRewardBaseModel):
         sim = th.matmul(z_flat, z_flat.T) / temperature
 
         # Build index grids
-        idxs_t = th.arange(T).repeat_interleave(N)   # [0,0,1,1,2,2,...]
-        idxs_e = th.arange(N).repeat(T)              # [0,1,0,1,0,1,...]
+        idxs_t = th.arange(T, device=device).repeat_interleave(N)   # [0,0,1,1,2,2,...]
+        idxs_e = th.arange(N, device=device).repeat(T)              # [0,1,0,1,0,1,...]
 
         t1 = idxs_t.unsqueeze(1).expand(-1, T*N)
         t2 = idxs_t.unsqueeze(0).expand(T*N, -1)
@@ -472,10 +483,11 @@ class AEGIS(IntrinsicRewardBaseModel):
 
         # Weighting: closer pairs = higher weight (1/delta_t)
         pos_weights = th.zeros_like(sim)
+        
         pos_weights[pos_mask] = 1.0 / delta_t[pos_mask].float()
 
         # Negatives = everything else except self
-        neg_mask = (~pos_mask) & (~th.eye(T*N, dtype=th.bool, device=z.device))
+        neg_mask = (~pos_mask) & (~th.eye(T*N, dtype=th.bool, device=device))
 
         # Compute numerator/denominator
         exp_sim = th.exp(sim)
@@ -485,7 +497,7 @@ class AEGIS(IntrinsicRewardBaseModel):
 
         # Avoid division by zero if no positives
         valid = numerator > 0
-        loss = th.zeros(T*N, device=z.device)
+        loss = th.zeros(T*N, device=device)
         loss[valid] = -th.log(numerator[valid] / denominator[valid])
 
         return loss.mean()

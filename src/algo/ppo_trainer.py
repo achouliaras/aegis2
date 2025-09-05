@@ -224,7 +224,7 @@ class PPOTrainer(PPORollout):
                 if rew_model_epochs < self.model_n_epochs:
                     rew_model_epochs +=1
                     # Update embeddings and novelty scores in novel experience memory
-                    self.policy.int_rew_model.update_embeddings()
+                    self.policy.int_rew_model.update_embeddings(device=self.device)
                 if ppo_epochs < self.n_epochs:
                     ppo_epochs +=1
         return loss
