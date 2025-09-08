@@ -565,7 +565,7 @@ class PPORollout(BaseAlgorithm):
                 door_status_tensor = None
                 target_dists_tensor = None
 
-        # AEGIS
+        # Aegis
         if self.int_rew_source == ModelType.AEGIS:
             intrinsic_rewards, next_embs, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
                 curr_obs=curr_obs_tensor,
@@ -579,15 +579,23 @@ class PPORollout(BaseAlgorithm):
                 target_dists=target_dists_tensor,
                 stats_logger=self.rollout_stats
             )
-            self.policy.int_rew_model.update_novel_experience_memory(
-                iteration=self.iteration,
-                new_obs=new_obs,
-                new_embs=next_embs,
+        # AegisV2
+        elif self.int_rew_source == ModelType.AEGISV2:
+            intrinsic_rewards, next_embs, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
+                curr_obs=curr_obs_tensor,
+                next_obs=next_obs_tensor,
                 last_mems=last_model_mem_tensor,
+                obs_history=self.episodic_obs_emb_history,
+                trj_history=self.episodic_trj_emb_history,
+                curr_act=curr_act_tensor,
+                curr_dones=done_tensor,
+                key_status=key_status_tensor,
+                door_status=door_status_tensor,
+                target_dists=target_dists_tensor,
                 stats_logger=self.rollout_stats
             )
-        # AEGISV2 / DEIR / Plain discriminator model
-        elif self.int_rew_source in [ModelType.AEGISV2, ModelType.DEIR, ModelType.PlainDiscriminator]:
+        # DEIR / Plain discriminator model
+        elif self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
             intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
                 curr_obs=curr_obs_tensor,
                 next_obs=next_obs_tensor,
@@ -603,14 +611,6 @@ class PPORollout(BaseAlgorithm):
                     iteration=self.iteration,
                     intrinsic_rewards=intrinsic_rewards,
                     ir_mean=self.ppo_rollout_buffer.int_rew_stats.mean,
-                    new_obs=new_obs,
-                    stats_logger=self.rollout_stats
-                )
-            elif self.int_rew_source in [ModelType.AEGISV2]:
-                self.policy.int_rew_model.update_obs_queue(
-                    iteration=self.iteration,
-                    intrinsic_rewards=intrinsic_rewards,
-                    local_ir_mean=self.ppo_rollout_buffer.int_rew_stats.mean,
                     new_obs=new_obs,
                     stats_logger=self.rollout_stats
                 )
@@ -668,6 +668,17 @@ class PPORollout(BaseAlgorithm):
             )
         else:
             raise NotImplementedError
+        
+        # Aegis and AegisV2: update the novel experience memory
+        if self.int_rew_source in [ModelType.AEGIS, ModelType.AEGISV2]:
+            self.policy.int_rew_model.update_novel_experience_memory(
+                iteration=self.iteration,
+                new_obs=new_obs,
+                new_embs=next_embs,
+                last_mems=last_model_mem_tensor,
+                stats_logger=self.rollout_stats
+            )
+
         return intrinsic_rewards, model_mems
 
 
