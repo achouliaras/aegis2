@@ -181,7 +181,7 @@ def train(config):
               help='EMA smoothing factor for IR normalization (-1: total average)')
 @click.option('--int_rew_eps', default=1e-5, type=float, help='Epsilon for IR normalization')
 @click.option('--int_rew_clip', default=-1, type=float, help='Clip IRs into [-X, X] when X>0')
-@click.option('--aegis_nov_exp_mem_capacity', default=100000, type=int, help='Novel experience memory capacity (AEGIS)')
+@click.option('--aegis_nov_exp_mem_capacity', default=10000, type=int, help='Novel experience memory capacity (AEGIS)')
 @click.option('--aegis_knn_k', default=5, type=int, help='Search for K nearest neighbors (AEGIS)')
 @click.option('--aegis_dst_momentum', default=0.997, type=float, help='EMA smoothing factor for averaging embedding distances (AEGIS)')
 @click.option('--dsc_obs_queue_len', default=100000, type=int, help='Maximum length of observation queue (DEIR)')

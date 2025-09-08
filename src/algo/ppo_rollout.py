@@ -579,7 +579,7 @@ class PPORollout(BaseAlgorithm):
                 target_dists=target_dists_tensor,
                 stats_logger=self.rollout_stats
             )
-            self.policy.int_rew_model.update_experience_memory(
+            self.policy.int_rew_model.update_novel_experience_memory(
                 iteration=self.iteration,
                 new_obs=new_obs,
                 new_embs=next_embs,

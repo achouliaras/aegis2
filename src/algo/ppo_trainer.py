@@ -1,7 +1,7 @@
 import torch as th
 import wandb
 import warnings
-
+import time
 from gym import spaces
 from torch import Tensor
 
@@ -190,18 +190,24 @@ class PPOTrainer(PPORollout):
                 # Train intrinsic reward models
                 if not uses_aegis and epoch < self.model_n_epochs:
                     if self.policy.int_rew_source != ModelType.NoModel:
+                        # int_rew_start_time = time.time()
                         self.policy.int_rew_model.optimize(
                             rollout_data=rollout_data,
                             stats_logger=self.training_stats
                         )
+                        # int_rew_end_time = time.time()
+                        # print(f"INT REW model Update cost: {int_rew_end_time - int_rew_start_time:.3f} sec")
                 elif uses_aegis and rew_model_epochs < self.model_n_epochs and (batch_num//update_frequency) % 2 == 0:
                         rew_model_stack.append(rollout_data)
                         ppo_stack.append(rollout_data)
                         for data in rew_model_stack:
+                            # lmdp_start_time = time.time()
                             self.policy.int_rew_model.optimize(
                                 rollout_data=data,
                                 stats_logger=self.training_stats
                             )
+                            # lmdp_end_time = time.time()
+                            # print(f"LMDP Update cost: {lmdp_end_time - lmdp_start_time:.3f} sec")
                             # print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_epochs+1} epoch(s)====")
                         rew_model_stack.clear()
                         
@@ -223,10 +229,14 @@ class PPOTrainer(PPORollout):
             if uses_aegis: 
                 if rew_model_epochs < self.model_n_epochs:
                     rew_model_epochs +=1
-                    # Update embeddings and novelty scores in novel experience memory
-                    self.policy.int_rew_model.update_embeddings(device=self.device)
                 if ppo_epochs < self.n_epochs:
                     ppo_epochs +=1
+        if uses_aegis:
+            # Update embeddings and novelty scores in novel experience memory
+            # update_start_time = time.time()
+            self.policy.int_rew_model.update_embeddings(device=self.device)
+            # update_end_time = time.time()
+            # print(f"Update embeddings: {update_end_time - update_start_time:.3f} sec")
         return loss
 
     def ppo_update(self, epoch, rollout_data, clip_range, clip_range_vf):

@@ -2,7 +2,7 @@
 for seed in 0; do
   PYTHONPATH=./ python src/train.py \
     --run_id=$seed \
-    --num_processes=2\
+    --num_processes=3\
     --total_steps=500_000 \
     --int_rew_source=AEGIS \
     --env_source=minigrid \

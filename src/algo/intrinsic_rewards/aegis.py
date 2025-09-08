@@ -151,17 +151,17 @@ class AEGIS(IntrinsicRewardBaseModel):
         
     def calculate_novelty_score(self, obs_embs):
         if self.obs_queue_filled <= self.aegis_knn_k:
-            novelty_score = 0.0
-            similarity = 1.0
+            B = obs_embs.shape[0]
+            novelty_scores = th.zeros(B, device=obs_embs.device)
+            similarities = th.ones(B, device=obs_embs.device)
         else:
             # Compute the embedding distance between the new observation and all observations in the novel experience memory
-            dists = self.calc_euclidean_dists(
-                th.tensor(self.obs_embs_queue[:self.obs_queue_filled], dtype=th.float32, device=obs_embs.device),
-                obs_embs[-1]
-            ) ** 2
-            dists = dists.clone().cpu().numpy()
+            memory = th.tensor(self.obs_embs_queue[:self.obs_queue_filled], dtype=th.float32, device=obs_embs.device)
+            dists = self.calc_euclidean_dists(memory, obs_embs) ** 2
+            print("DISTS", dists.shape)
+            
             # Compute the k-nearest neighbours of the new observation in the memory
-            knn_dists = np.sort(dists)[:self.aegis_knn_k]
+            knn_dists, _  = th.topk(dists, self.aegis_knn_k, dim=0, largest=False)
             # Update the moving average of the k-nearest neighbour distances
             
             # print(f"===KNN DISTS: {knn_dists}")
@@ -174,15 +174,43 @@ class AEGIS(IntrinsicRewardBaseModel):
             # input()
 
             # Cluster the normalized distances. i.e. they become 0 if too small and 0k is a list of k zeros
-            norm_knn_dists = np.maximum(norm_knn_dists - 0.01, np.zeros_like(knn_dists))
+            norm_knn_dists = th.clamp(knn_dists - 0.01, min=0.0)
             # Compute the Kernel values between the embedding f (x_t) and its neighbours N_k
-            similarity = 0.0001 / (norm_knn_dists.mean() + 0.0001)
-            novelty_score = 1 - similarity
-            # print(f"=== NOV {novelty_score} ==== SIM {similarity}")
-        return novelty_score, similarity
+            similarities = 0.0001 / (norm_knn_dists.mean(dim=0) + 0.0001)
+            novelty_scores = 1 - similarities
+            # print(f"=== NOV {novelty_scores} ==== SIM {similarities}")
+        return novelty_scores, similarities
         
 
-    def update_experience_memory(self, iteration, new_obs, new_embs, last_mems, stats_logger):
+    def init_novel_experience_memory(self, initial_obs, last_mems, curr_key_status, curr_door_status, curr_agent_pos, device):
+        """
+        In order to ensure the novel experience memory is not empty on training start
+        by adding all observations received at time step 0.
+        """
+        n_envs = initial_obs.shape[0]
+        curr_act = th.zeros((n_envs, get_action_dim(self.action_space)), dtype=th.long if isinstance(self.action_space, spaces.Discrete) else th.float32, device=device)
+
+        with th.no_grad():
+            _, _, _, _, _, _, _, _, _, _, initial_embs, _, init_mems = \
+                self.forward(
+                    curr_obs=initial_obs, 
+                    next_obs=initial_obs, 
+                    last_mems=last_mems,
+                    curr_act=curr_act.squeeze(-1),
+                    curr_dones=th.zeros((n_envs,), dtype=th.float32, device=device), 
+                    curr_key_status=curr_key_status, 
+                    curr_door_status=curr_door_status, 
+                    curr_agent_pos=curr_agent_pos
+                )
+            initial_obs = initial_obs.clone().cpu().numpy()
+            initial_embs = initial_embs.clone().cpu().numpy()
+            init_mems = init_mems.clone().cpu().numpy()
+        
+        for i in range(n_envs):
+            self._add_obs(initial_obs[i], initial_embs[i], init_mems[i] if self.use_model_rnn else None)
+    
+
+    def update_novel_experience_memory(self, iteration, new_obs, new_embs, last_mems, stats_logger):
         """
         Update the novel experience memory after generating the intrinsic rewards for
         the current RL rollout. Tries to add one new observation per environment.
@@ -221,45 +249,15 @@ class AEGIS(IntrinsicRewardBaseModel):
                     stats_logger.add(obs_insertions=0)
 
 
-    def init_novel_experience_memory(self, initial_obs, last_mems, curr_key_status, curr_door_status, curr_agent_pos, device):
-        """
-        In order to ensure the novel experience memory is not empty on training start
-        by adding all observations received at time step 0.
-        """
-        n_envs = initial_obs.shape[0]
-        curr_act = th.zeros((n_envs, get_action_dim(self.action_space)), dtype=th.long if isinstance(self.action_space, spaces.Discrete) else th.float32, device=device)
-
-        with th.no_grad():
-            _, _, _, _, _, _, _, _, _, _, initial_embs, _, init_mems = \
-                self.forward(
-                    curr_obs=initial_obs, 
-                    next_obs=initial_obs, 
-                    last_mems=last_mems,
-                    curr_act=curr_act.squeeze(-1),
-                    curr_dones=th.zeros((n_envs,), dtype=th.float32, device=device), 
-                    curr_key_status=curr_key_status, 
-                    curr_door_status=curr_door_status, 
-                    curr_agent_pos=curr_agent_pos
-                )
-            initial_obs = initial_obs.clone().cpu().numpy()
-            initial_embs = initial_embs.clone().cpu().numpy()
-            init_mems = init_mems.clone().cpu().numpy()
-        
-        for i in range(n_envs):
-            self._add_obs(initial_obs[i], initial_embs[i], init_mems[i] if self.use_model_rnn else None)
-    
-
     def _update_novelty_scores(self):
         """Refresh all novelty scores"""
         if self.obs_queue_filled == 0:
             return
         else:
             with th.no_grad():
-                queue_obs_embs = th.tensor(self.obs_embs_queue[:self.obs_queue_filled],
-                                    dtype=th.float32)
-                for i in range(self.obs_queue_filled):
-                    novelty_score, _ = self.calculate_novelty_score(queue_obs_embs[i].view(1, -1))
-                    self.novelty_scores[i] = novelty_score
+                queue_obs_embs = th.tensor(self.obs_embs_queue[:self.obs_queue_filled], dtype=th.float32)
+                novelty_scores, _ = self.calculate_novelty_score(queue_obs_embs[:self.obs_queue_filled])
+                self.novelty_scores[:self.obs_queue_filled] = novelty_scores
 
 
     def update_embeddings(self, device):
@@ -313,7 +311,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         inv_losses = F.cross_entropy(pred_act, curr_act, reduction='none') * (1 - curr_dones)
         inv_loss = inv_losses.sum() * (1 / n_samples if n_samples > 0 else 0.0)
 
-        contrastive_loss = self.contrastive_loss(curr_embs.unsqueeze(0), temperature=0.1)
+        contrastive_loss = self.contrastive_loss(curr_embs.unsqueeze(0), temperature=0.1)        
 
         lmdp_loss = inv_loss + 0.05 * contrastive_loss
 
@@ -353,28 +351,27 @@ class AEGIS(IntrinsicRewardBaseModel):
             # Update historical observation embeddings
             curr_emb = curr_embs[env_id].view(1, -1)
             next_emb = next_embs[env_id].view(1, -1)
-            obs_embs = obs_history[env_id]
-            new_embs = [curr_emb, next_emb] if obs_embs is None else [obs_embs, next_emb]
-            obs_embs = th.cat(new_embs, dim=0)
-            obs_history[env_id] = obs_embs
+            # obs_embs = obs_history[env_id]
+            # new_embs = [curr_emb, next_emb] if obs_embs is None else [obs_embs, next_emb]
+            # obs_embs = th.cat(new_embs, dim=0)
+            # obs_history[env_id] = obs_embs
 
-            if obs_embs.shape[0] > 1:
-                curr_obs_global_novelty, _ = self.calculate_novelty_score(curr_emb)
-                next_obs_global_novelty, _ = self.calculate_novelty_score(next_emb)
-                curr_novelty = curr_obs_global_novelty
-                next_novelty = next_obs_global_novelty
-                novelty = max(next_novelty - curr_novelty * self.novelty_alpha, self.novelty_beta)
+            curr_obs_global_novelty, _ = self.calculate_novelty_score(curr_emb)
+            next_obs_global_novelty, _ = self.calculate_novelty_score(next_emb)
+            curr_novelty = curr_obs_global_novelty
+            next_novelty = next_obs_global_novelty
+            novelty = max(next_novelty - curr_novelty * self.novelty_alpha, self.novelty_beta)
 
-                # Restriction on IRs
-                if env_id not in self.globally_visited_obs:
-                    self.globally_visited_obs[env_id] = set()
+            # Restriction on IRs
+            if env_id not in self.globally_visited_obs:
+                self.globally_visited_obs[env_id] = set()
 
-                obs_hash = tuple(next_obs[env_id].reshape(-1).tolist())
-                if obs_hash in self.globally_visited_obs[env_id]:
-                    novelty *= 0.0
-                else:
-                    self.globally_visited_obs[env_id].add(obs_hash)
-                global_rewards[env_id] += novelty
+            obs_hash = tuple(next_obs[env_id].reshape(-1).tolist())
+            if obs_hash in self.globally_visited_obs[env_id]:
+                novelty *= 0.0
+            else:
+                self.globally_visited_obs[env_id].add(obs_hash)
+            global_rewards[env_id] += novelty
             
             int_rews[env_id] += self.l_coef*local_reward[env_id] + self.g_coef*global_rewards[env_id]
             # print(f"\nEnv {env_id}:\n Int Rew = {int_rews[env_id]:.4f},\n Local Reward = {local_reward[env_id]:.4f},\n Global Reward = {global_rewards[env_id]:.4f}\n")
