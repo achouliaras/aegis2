@@ -37,7 +37,7 @@ class ModelType(Enum):
                 return ModelType.PlainInverse
             elif model_type == "plaindiscriminator":
                 return ModelType.PlainDiscriminator
-            elif model_type == "aegis":
+            elif "aegis" in model_type:
                 return ModelType.AEGIS
             else:
                 return ModelType.NoModel

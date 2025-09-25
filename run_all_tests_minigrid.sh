@@ -1,7 +1,7 @@
 #!/bin/bash
-declare -a test_cases=("QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain")
-declare -a methods=("DEIR" "ICM" "NGU" "NoModel" "NovelD" "RND")
-declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3" "ObstructedMaze-Full-V3")
+declare -a test_cases=("NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain")
+declare -a methods=("NoModel" "ICM" "RND" "NGU" "NovelD" "DEIR") # "AEGIS" "AEGISV2"
+declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "ObstructedMaze-Full-V3"
 
 for group_name in "${test_cases[@]}"; do
   for env in "${arr[@]}"; do

@@ -269,5 +269,49 @@ class DiscriminatorOutputHeads(nn.Module):
         one_hot_act = F.one_hot(curr_act, num_classes=self.action_num)
         inputs = th.cat([curr_emb, next_emb, one_hot_act], dim=1)
         return self.nn(inputs)
+    
+class AegisModelOutputHeads(nn.Module):
+    def __init__(
+        self,
+        inputs_dim: int,
+        latents_dim: int = 128,
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        action_num: int = 0,
+        mlp_norm: NormType = NormType.NoNorm,
+        mlp_layers: int = 1,
+    ):
+        super(AegisModelOutputHeads, self).__init__()
+        self.action_num = action_num
 
-# Maybe add AEGIS output heads here too
+        modules = [
+            nn.Linear(inputs_dim * 2, latents_dim),
+            NormType.get_norm_layer_1d(mlp_norm, latents_dim),
+            activation_fn(),
+        ]
+        dsc_modules = [
+            nn.Linear(inputs_dim * 2 + action_num, latents_dim),
+            NormType.get_norm_layer_1d(mlp_norm, latents_dim),
+            activation_fn(),
+        ]
+        for _ in range(1, mlp_layers):
+            modules += [
+                nn.Linear(latents_dim, latents_dim),
+                NormType.get_norm_layer_1d(mlp_norm, latents_dim),
+                activation_fn(),
+            ]
+            dsc_modules += [
+                nn.Linear(latents_dim, latents_dim),
+                NormType.get_norm_layer_1d(mlp_norm, latents_dim),
+                activation_fn(),
+            ]
+        modules.append(nn.Linear(latents_dim, action_num))
+        dsc_modules.append(nn.Linear(latents_dim, 1))
+        self.nn = nn.Sequential(*modules)
+        self.dsc_nn = nn.Sequential(*dsc_modules)
+
+    def forward(self, curr_emb: Tensor, next_emb: Tensor, curr_act: Tensor) -> Tensor:
+        inputs = th.cat([curr_emb, next_emb], dim=1)
+
+        one_hot_act = F.one_hot(curr_act, num_classes=self.action_num)
+        dsc_inputs = th.cat([curr_emb.clone(), next_emb.clone(), one_hot_act], dim=1)
+        return self.nn(inputs), self.dsc_nn(dsc_inputs)

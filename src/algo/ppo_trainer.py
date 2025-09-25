@@ -164,79 +164,28 @@ class PPOTrainer(PPORollout):
             self.clip_range_vf = get_schedule_fn(self.clip_range_vf)
 
 
-    def train_policy_and_models(self, clip_range, clip_range_vf) -> Tensor:
+    def train_policy_and_models(self, clip_range, clip_range_vf, model_to_train="Both") -> Tensor:
         loss = None
         continue_training = True
-
-        # TODO: ADD alternating updates for AEGIS
-        # Init data dept queues
-        uses_aegis = self.policy.int_rew_source == ModelType.AEGIS
         epochs = max(self.n_epochs, self.model_n_epochs)
-
-        if uses_aegis: 
-            epochs = self.n_epochs + self.model_n_epochs
-            rew_model_epochs = 0
-            ppo_epochs = 0
-            rew_model_stack = []
-            ppo_stack = []
-            batch_num = 0
-            update_frequency = 1
-
         for epoch in range(epochs):
-            for rollout_data in self.ppo_rollout_buffer.get(self.batch_size):
-                if uses_aegis: 
-                    batch_num +=1
-                # TODO: ADD alternating updates for AEGIS
+            for rollout_data in self.ppo_rollout_buffer.get(self.batch_size, self.train_int_rew_flag):
                 # Train intrinsic reward models
-                if not uses_aegis and epoch < self.model_n_epochs:
+                if epoch < self.model_n_epochs and model_to_train in ["IntRew", "Both"]:
                     if self.policy.int_rew_source != ModelType.NoModel:
-                        # int_rew_start_time = time.time()
                         self.policy.int_rew_model.optimize(
                             rollout_data=rollout_data,
                             stats_logger=self.training_stats
                         )
-                        # int_rew_end_time = time.time()
-                        # print(f"INT REW model Update cost: {int_rew_end_time - int_rew_start_time:.3f} sec")
-                elif uses_aegis and rew_model_epochs < self.model_n_epochs and (batch_num//update_frequency) % 2 == 0:
-                        rew_model_stack.append(rollout_data)
-                        ppo_stack.append(rollout_data)
-                        for data in rew_model_stack:
-                            # lmdp_start_time = time.time()
-                            self.policy.int_rew_model.optimize(
-                                rollout_data=data,
-                                stats_logger=self.training_stats
-                            )
-                            # lmdp_end_time = time.time()
-                            # print(f"LMDP Update cost: {lmdp_end_time - lmdp_start_time:.3f} sec")
-                            # print(f"==== Epoch {epoch} Batch {batch_num} ==== LMDP    TRAINED FOR {rew_model_epochs+1} epoch(s)====")
-                        rew_model_stack.clear()
-                        
-                # TODO: ADD alternating updates for AEGIS
+                        # if self.policy.int_rew_source == ModelType.AEGIS:
+                        #     # self.policy.int_rew_model.update_embeddings(device=self.device)
+                        #     pass
                 # Training for policy and value nets
-                if not uses_aegis and epoch < self.n_epochs:
+                if epoch < self.n_epochs and model_to_train in ["Policy", "Both"]:
                     loss, continue_training = self.ppo_update(epoch, rollout_data, clip_range, clip_range_vf)
-                elif uses_aegis and ppo_epochs < self.n_epochs and (batch_num//update_frequency) % 2 != 0:
-                    rew_model_stack.append(rollout_data)
-                    ppo_stack.append(rollout_data)
-                    for data in ppo_stack:
-                        loss, continue_training_temp= self.ppo_update(epoch, data, clip_range, clip_range_vf)  
-                        continue_training = continue_training or continue_training_temp
-                        # print(f"==== Epoch {epoch} Batch {batch_num} ====     PPO TRAINED FOR {ppo_epochs+1} time(s)====")         
-                    ppo_stack.clear() 
                 # END OF A TRAINING BATCH
                 if not continue_training:
                     break
-            if uses_aegis: 
-                if rew_model_epochs < self.model_n_epochs:
-                    rew_model_epochs +=1
-                if ppo_epochs < self.n_epochs:
-                    ppo_epochs +=1
-        if uses_aegis:
-            # Update embeddings and novelty scores in novel experience memory
-            # update_start_time = time.time()
-            self.policy.int_rew_model.update_embeddings(device=self.device)
-            # update_end_time = time.time()
-            # print(f"Update embeddings: {update_end_time - update_start_time:.3f} sec")
         return loss
 
     def ppo_update(self, epoch, rollout_data, clip_range, clip_range_vf):
@@ -324,7 +273,7 @@ class PPOTrainer(PPORollout):
         self.policy.optimizer.step()
         continue_training = True
         return loss, continue_training
-            
+
     def train(self) -> None:
         # Update optimizer learning rate
         self._update_learning_rate(self.policy.optimizer)
@@ -337,10 +286,25 @@ class PPOTrainer(PPORollout):
 
         # Log training stats per each iteration
         self.training_stats = StatisticsLogger(mode='train')
+        uses_aegis = self.policy.int_rew_source == ModelType.AEGIS
 
-        # Train PPO policy (+value function) and intrinsic reward models
-        ppo_loss = self.train_policy_and_models(clip_range, clip_range_vf)
-
+        # Alternating updates and data depts for pretraining only
+        if uses_aegis and self.use_alt_updates and self.num_timesteps < self.total_timesteps * self.pretrain_percentage:
+            if self.train_int_rew_flag:
+                self.train_policy_and_models(clip_range, clip_range_vf, "IntRew")
+                self.policy.int_rew_model.update_embeddings(device=self.device)
+                self.train_int_rew_flag = False
+                # print("Finished LMDP update")
+                # default ppo_loss value to nan when not trained
+                ppo_loss = th.tensor(float('nan'))
+            else:
+                ppo_loss = self.train_policy_and_models(clip_range, clip_range_vf, "Policy")
+                self.train_int_rew_flag = True
+                # print("Finished PPO update")
+        else:
+            # Train PPO policy (+value function) and intrinsic reward models
+            ppo_loss = self.train_policy_and_models(clip_range, clip_range_vf, "Both")
+        
         # Update stats
         self._n_updates += self.n_epochs
         explained_var = explained_variance(self.ppo_rollout_buffer.values.flatten(), self.ppo_rollout_buffer.returns.flatten())

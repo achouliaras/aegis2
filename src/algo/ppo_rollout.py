@@ -118,6 +118,14 @@ class PPORollout(BaseAlgorithm):
         
         self.total_timesteps = policy_kwargs['total_timesteps']
         self.pretrain_percentage = policy_kwargs['pretrain_percentage']
+        
+        self.train_int_rew_flag = None # Other methods do not need this flag
+        if self.int_rew_source == ModelType.AEGIS:
+            # self.train_int_rew_flag = False # AEGIS for alternating training
+            # self.first_reset = True
+            self.use_alt_updates = False # Whether to use alternating updates
+        else:
+            self.use_alt_updates = False
 
         if _init_setup_model:
             self._setup_model()
@@ -133,8 +141,13 @@ class PPORollout(BaseAlgorithm):
             **self.policy_kwargs  # pytype:disable=not-instantiable
         )
         self.policy = self.policy.to(self.device)
+
+        buffer_size = self.n_steps
+        # if self.int_rew_source in [ModelType.AEGIS]: # For AEGIS, alternating training
+        #     buffer_size = 2*self.n_steps  
+
         self.ppo_rollout_buffer = PPORolloutBuffer(
-            self.n_steps,
+            buffer_size,
             self.observation_space,
             self.action_space,
             self.device,
@@ -233,18 +246,13 @@ class PPORollout(BaseAlgorithm):
         self._last_policy_mems = float_zeros([self.n_envs, self.policy.gru_layers, self.policy.dim_policy_features])
         self._last_model_mems = float_zeros([self.n_envs, self.policy.gru_layers, self.policy.dim_model_features])
 
-        if self.int_rew_source in [ModelType.AEGISV2]:
-            self.policy.int_rew_model.init_obs_queue(self._last_obs)
-            self.policy.int_rew_model.init_novel_experience_memory(self._last_obs)
-
         if self.int_rew_source in [ModelType.AEGIS]:
+            self.policy.int_rew_model.init_obs_queue(self._last_obs)
             last_obs_tensor = obs_as_tensor(self._last_obs, self.device)
             self.policy.int_rew_model.init_novel_experience_memory(last_obs_tensor, 
                                                                    self._last_model_mems,
-                                                                   self.curr_key_status, 
-                                                                   self.curr_door_status,
-                                                                   self.curr_agent_pos, 
                                                                    device=self.device)
+
 
     def init_on_rollout_start(self):
         # Log statistics data per each rollout
@@ -567,31 +575,21 @@ class PPORollout(BaseAlgorithm):
 
         # Aegis
         if self.int_rew_source == ModelType.AEGIS:
-            intrinsic_rewards, next_embs, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
+            intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
                 curr_obs=curr_obs_tensor,
                 next_obs=next_obs_tensor,
                 last_mems=last_model_mem_tensor,
-                obs_history=self.episodic_obs_emb_history,
                 curr_act=curr_act_tensor,
                 curr_dones=done_tensor,
-                key_status=key_status_tensor,
-                door_status=door_status_tensor,
-                target_dists=target_dists_tensor,
-                stats_logger=self.rollout_stats
-            )
-        # AegisV2
-        elif self.int_rew_source == ModelType.AEGISV2:
-            intrinsic_rewards, next_embs, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
-                curr_obs=curr_obs_tensor,
-                next_obs=next_obs_tensor,
-                last_mems=last_model_mem_tensor,
                 obs_history=self.episodic_obs_emb_history,
                 trj_history=self.episodic_trj_emb_history,
-                curr_act=curr_act_tensor,
-                curr_dones=done_tensor,
-                key_status=key_status_tensor,
-                door_status=door_status_tensor,
-                target_dists=target_dists_tensor,
+                stats_logger=self.rollout_stats
+            )
+            self.policy.int_rew_model.update_obs_queue(
+                iteration=self.iteration,
+                intrinsic_rewards=intrinsic_rewards,
+                ir_mean=self.ppo_rollout_buffer.int_rew_stats.mean,
+                new_obs=new_obs,
                 stats_logger=self.rollout_stats
             )
         # DEIR / Plain discriminator model
@@ -605,15 +603,14 @@ class PPORollout(BaseAlgorithm):
                 plain_dsc=bool(self.int_rew_source == ModelType.PlainDiscriminator),
             )
             # Insert obs into the Discriminator's obs queue
-            # Algorithm A2 in the Technical Appendix
-            if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
-                self.policy.int_rew_model.update_obs_queue(
-                    iteration=self.iteration,
-                    intrinsic_rewards=intrinsic_rewards,
-                    ir_mean=self.ppo_rollout_buffer.int_rew_stats.mean,
-                    new_obs=new_obs,
-                    stats_logger=self.rollout_stats
-                )
+            # Algorithm A2 in the Technical Appendix of DEIR paper
+            self.policy.int_rew_model.update_obs_queue(
+                iteration=self.iteration,
+                intrinsic_rewards=intrinsic_rewards,
+                ir_mean=self.ppo_rollout_buffer.int_rew_stats.mean,
+                new_obs=new_obs,
+                stats_logger=self.rollout_stats
+            )
         # Plain forward / inverse model
         elif self.int_rew_source in [ModelType.PlainForward, ModelType.PlainInverse]:
             intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
@@ -669,16 +666,6 @@ class PPORollout(BaseAlgorithm):
         else:
             raise NotImplementedError
         
-        # Aegis and AegisV2: update the novel experience memory
-        if self.int_rew_source in [ModelType.AEGIS, ModelType.AEGISV2]:
-            self.policy.int_rew_model.update_novel_experience_memory(
-                iteration=self.iteration,
-                new_obs=new_obs,
-                new_embs=next_embs,
-                last_mems=last_model_mem_tensor,
-                stats_logger=self.rollout_stats
-            )
-
         return intrinsic_rewards, model_mems
 
 
@@ -691,7 +678,20 @@ class PPORollout(BaseAlgorithm):
     ) -> bool:
         assert self._last_obs is not None, "No previous observation was provided"
         n_steps = 0
-        ppo_rollout_buffer.reset()
+
+        # Reset every other round for alternating updates and for pretraining only
+        if self.policy.int_rew_source == ModelType.AEGIS and self.use_alt_updates:
+            if self.num_timesteps < self.total_timesteps * self.pretrain_percentage:
+                self.ppo_rollout_buffer.half_reset(self.train_int_rew_flag)
+            else:
+                if self.first_reset:
+                    self.ppo_rollout_buffer.train_int_rew_flag = None
+                    self.ppo_rollout_buffer.buffer_size = self.n_steps
+                    self.first_reset = False
+                self.ppo_rollout_buffer.reset()
+        else:
+            self.ppo_rollout_buffer.reset()
+            
         # Sample new weights for the state dependent exploration
         if self.use_sde:
             self.policy.reset_noise(env.num_envs)
@@ -810,7 +810,7 @@ class PPORollout(BaseAlgorithm):
                 self.env,
                 callback,
                 self.ppo_rollout_buffer,
-                n_rollout_steps=self.ppo_rollout_buffer.buffer_size)
+                n_rollout_steps=self.n_steps)
             self.policy.train()
             collect_end_time = time.time()
 

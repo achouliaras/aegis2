@@ -191,11 +191,13 @@ class PPOModel(ActorCriticCnnPolicy):
             self.int_rew_model = AEGIS(
                 aegis_nem_capacity=aegis_nov_exp_mem_capacity,
                 **int_rew_model_kwargs,
+                obs_rng=np.random.default_rng(seed=self.run_id + 131),
+                lmdp_obs_queue_len=self.dsc_obs_queue_len,
+                log_lmdp_verbose=self.log_dsc_verbose,
                 aegis_knn_k=aegis_knn_k,
                 aegis_dst_momentum= aegis_dst_momentum,
             )
-            
-        if self.int_rew_source in [ModelType.AEGISV2, ModelType.DEIR, ModelType.PlainDiscriminator]:
+        if self.int_rew_source in [ModelType.DEIR, ModelType.PlainDiscriminator]:
             self.int_rew_model = DiscriminatorModel(
                 **int_rew_model_kwargs,
                 obs_rng=np.random.default_rng(seed=self.run_id + 131),
