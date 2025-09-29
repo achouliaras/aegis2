@@ -175,7 +175,8 @@ class PPOTrainer(PPORollout):
                     if self.policy.int_rew_source != ModelType.NoModel:
                         self.policy.int_rew_model.optimize(
                             rollout_data=rollout_data,
-                            stats_logger=self.training_stats
+                            stats_logger=self.training_stats,
+                            int_rew_source=self.policy.int_rew_source,
                         )
                         # if self.policy.int_rew_source == ModelType.AEGIS:
                         #     # self.policy.int_rew_model.update_embeddings(device=self.device)
@@ -286,13 +287,13 @@ class PPOTrainer(PPORollout):
 
         # Log training stats per each iteration
         self.training_stats = StatisticsLogger(mode='train')
-        uses_aegis = self.policy.int_rew_source == ModelType.AEGIS
+        uses_aegis = self.policy.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only]
 
         # Alternating updates and data depts for pretraining only
         if uses_aegis and self.use_alt_updates and self.num_timesteps < self.total_timesteps * self.pretrain_percentage:
             if self.train_int_rew_flag:
                 self.train_policy_and_models(clip_range, clip_range_vf, "IntRew")
-                self.policy.int_rew_model.update_embeddings(device=self.device)
+                # self.policy.int_rew_model.update_embeddings(device=self.device)
                 self.train_int_rew_flag = False
                 # print("Finished LMDP update")
                 # default ppo_loss value to nan when not trained

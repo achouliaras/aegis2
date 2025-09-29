@@ -10,7 +10,7 @@ from stable_baselines3.common.utils import obs_as_tensor
 
 from src.algo.intrinsic_rewards.base_model import IntrinsicRewardBaseModel
 from src.algo.common_models.mlps import *
-from src.utils.enum_types import NormType
+from src.utils.enum_types import NormType, ModelType
 from src.utils.running_mean_std import RunningMeanStd
 
 class AEGIS(IntrinsicRewardBaseModel):
@@ -167,6 +167,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         key_status: Optional[Tensor],
         door_status: Optional[Tensor],
         target_dists: Optional[Tensor],
+        int_rew_source=ModelType.AEGIS
     ):
         # Count valid samples in a batch. A transition (o_t, a_t, o_t+1) is deemed invalid if:
         # 1) an episode ends at t+1, or 2) the ture sample is identical to the fake sample selected at t+1
@@ -204,12 +205,17 @@ class AEGIS(IntrinsicRewardBaseModel):
         contrastive_loss = (pos_dsc_loss + neg_dsc_loss) * 0.5
         
         # Inverse loss
-        curr_dones = curr_dones.view(-1)
+        curr_dones = curr_dones[:n_half_batch].view(-1)
         n_samples = (1 - curr_dones).sum()
-        inv_losses = F.cross_entropy(pred_act, curr_act, reduction='none') * (1 - curr_dones)
+        inv_losses = F.cross_entropy(pred_act[:n_half_batch], curr_act[:n_half_batch], reduction='none') * (1 - curr_dones)
         inv_loss = inv_losses.sum() * (1 / n_samples if n_samples > 0 else 0.0)
 
-        # lmdp_loss =  contrastive_loss
+        # if int_rew_source == ModelType.AEGIS_local_only:
+        #     lmdp_loss =  contrastive_loss
+        # elif int_rew_source == ModelType.AEGIS_global_only:
+        #     lmdp_loss =  inv_loss
+        # else: # ModelType.AEGIS or ModelType.AEGIS_alt
+        #     lmdp_loss = 0.2*inv_loss + contrastive_loss
         lmdp_loss = 0.2*inv_loss + contrastive_loss
 
         if self.log_lmdp_verbose:
@@ -360,7 +366,7 @@ class AEGIS(IntrinsicRewardBaseModel):
 
 
     def get_intrinsic_rewards(self,
-        curr_obs, next_obs, last_mems, curr_act, curr_dones, obs_history, trj_history, stats_logger
+        curr_obs, next_obs, last_mems, curr_act, curr_dones, obs_history, trj_history, stats_logger, int_rew_source=ModelType.AEGIS
     ):
         with th.no_grad():
             curr_cnn_embs, next_cnn_embs, \
@@ -374,15 +380,11 @@ class AEGIS(IntrinsicRewardBaseModel):
             curr_dones = curr_dones.view(-1)
             n_samples = (1 - curr_dones).sum()
             inv_losses = F.cross_entropy(pred_act, curr_act, reduction='none') * (1 - curr_dones)
-            inv_loss = inv_losses.sum() * (1 / n_samples if n_samples > 0 else 0.0)
-            global_rewards = inv_loss.clone().cpu().numpy()+1.0
-            # print("====== Inverse loss as global reward ======", global_rewards)
-            # global_rewards = max(global_rewards, 1.0)
+            global_rewards = inv_losses.clone().cpu().numpy() #+1.0
 
         batch_size = curr_obs.shape[0]
         int_rews = np.zeros(batch_size, dtype=np.float32)
         local_rewards = np.zeros(batch_size, dtype=np.float32)
-        # global_rewards = np.zeros(batch_size, dtype=np.float32)
         for env_id in range(batch_size):
             # Update the episodic history of observation embeddings
             curr_env_obs = curr_obs[env_id].unsqueeze(0)
@@ -448,9 +450,15 @@ class AEGIS(IntrinsicRewardBaseModel):
             #     stats_logger.add(obs_insertions=1)
             # else:
             #     stats_logger.add(obs_insertions=0)
-            
+
             # AEGIS: Equation 9 in the main paper
-            int_rews[env_id] += local_rewards[env_id] * global_rewards
+            if int_rew_source == ModelType.AEGIS_local_only:
+                int_rews[env_id] += local_rewards[env_id]
+            elif int_rew_source == ModelType.AEGIS_global_only:
+                int_rews[env_id] += global_rewards[env_id]
+            else: # ModelType.AEGIS or ModelType.AEGIS_alt
+                int_rews[env_id] += local_rewards[env_id] * global_rewards[env_id]
+                # int_rews[env_id] += local_rewards[env_id] + global_rewards[env_id]
 
         # Logging
         stats_logger.add(
@@ -461,7 +469,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         return int_rews, model_mems, 
 
 
-    def optimize(self, rollout_data, stats_logger):
+    def optimize(self, rollout_data, stats_logger, int_rew_source=ModelType.AEGIS):
         # Prepare input data
         with th.no_grad():
             actions = rollout_data.actions
@@ -494,7 +502,8 @@ class AEGIS(IntrinsicRewardBaseModel):
                 pred_labels.float().view(-1),
                 key_status,
                 door_status,
-                target_dists
+                target_dists,
+                int_rew_source=int_rew_source
             )
         
         self.model_optimizer.zero_grad()

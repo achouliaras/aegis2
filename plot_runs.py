@@ -2,6 +2,27 @@ import os
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import ScalarFormatter
+
+LABELS = {"NoModel": "PPO", 
+          "ICM": "ICM", 
+          "RND": "RND", 
+          "NGU": "NGU", 
+          "NovelD":"NovelD", 
+          "DEIR":"DEIR",
+          "AEGIS_5e-2":r"$\alpha = 0.05$",
+          "AEGIS_1e-3":r"$\alpha = 0.001$",
+          "AEGIS_5e-1":r"$\alpha = 0.5$",
+          "AEGIS_1e-1":r"$\alpha = 0.1$",
+          "AEGIS_5e-3":r"$\alpha = 0.005$",
+          "AEGIS_1":r"$\alpha = 1$",
+          "AEGIS_global_only": "Only global int reward",
+          "AEGIS_local_only": "Only local int reward",
+          "AEGIS_alt": "AEGIS Alternating updates",
+          "AEGIS_plus": "AEGIS (local + global)",
+          "AEGIS": "AEGIS (local * global)",
+          }
+        #   "AEGIS":r"AEGIS ($\alpha = 0.01$)",
 
 def plot_algorithms_for_env(
     env: str,
@@ -91,7 +112,7 @@ def plot_algorithms_for_env(
         averaged[algo] = merged[["time/total_timesteps", "mean", "std"]]
 
         # Plot with std band
-        ax.plot(merged["time/total_timesteps"], merged["mean"], label=algo)
+        ax.plot(merged["time/total_timesteps"], merged["mean"], label=LABELS[algo])
         ax.fill_between(
             merged["time/total_timesteps"],
             merged["mean"] - merged["std"],
@@ -104,16 +125,49 @@ def plot_algorithms_for_env(
         plt.close(fig)
         return averaged
 
-    ax.set_xlabel("Total Timesteps")
-    ax.set_ylabel("Episode Reward Mean")
-    ax.set_title(f"{env} — {mode} — algorithm comparison")
-    ax.legend()
+    ax.xaxis.set_major_formatter(ScalarFormatter())
+    ax.ticklabel_format(style="sci", axis="x", scilimits=(0,0))
+    ax.xaxis.get_offset_text().set_fontsize(16)   # change scientific notation text size
+    ax.tick_params(axis="both", which="major", labelsize=16)  # bigger font for major ticks
+    ax.tick_params(axis="both", which="minor", labelsize=14)  # optional, minor ticks
+    ax.set_xlabel("Total Timesteps", fontsize=16)
+    ax.set_ylabel("Episode Reward Mean", fontsize=16)
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_title(f"{env} — {mode} — feature ablation", fontsize=18)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.005, 1), borderaxespad=0.0, fontsize=16)
     ax.grid(True)
     plt.tight_layout()
 
+    # --- Add vertical line for pretraining/training split ---
+    max_timestep = max(df["time/total_timesteps"].max() for df in averaged.values())
+
+    if "ThreeQuarter" in mode:
+        split_frac = 0.75
+    elif "Quarter" in mode:
+        split_frac = 0.25
+    elif "Half" in mode:
+        split_frac = 0.50
+    else:
+        split_frac = None
+
+    if split_frac is not None:
+        split_step = max_timestep * split_frac
+        ax.axvline(split_step, color="black", linestyle="--", label="Pretraining")
+
+        # Annotate text
+        ymin, ymax = ax.get_ylim()
+        ax.text(split_step * 0.5, ymax * 0.975, "Pretraining",
+                ha="center", va="top", color="black", fontsize=16, fontweight="bold")
+        ax.text(split_step + (max_timestep - split_step) * 0.5, ymax * 0.975, "Training",
+                ha="center", va="top", color="black", fontsize=16, fontweight="bold")
+        
     try:
-        plt.savefig(out_filename, **save_kwargs)
-        print(f"✅ Saved figure to '{out_filename}'")
+        # os.makedirs(os.path.dirname(f"figures/{mode}/"+out_filename), exist_ok=True)
+        # plt.savefig(f"figures/{mode}/"+out_filename, **save_kwargs)
+        # print(f"✅ Saved figure to 'figures/{mode}/"+out_filename)
+        os.makedirs(os.path.dirname(f"figures/"+out_filename), exist_ok=True)
+        plt.savefig(f"figures/"+out_filename, **save_kwargs)
+        print(f"✅ Saved figure to 'figures/"+out_filename)
     except Exception as e:
         print(f"❌ Error saving figure '{out_filename}': {e}")
     finally:
@@ -124,21 +178,22 @@ def plot_algorithms_for_env(
 # --------------------------
 # Example usage (loops outside)
 # --------------------------
+            # "MiniGrid-DoorKey-8x8-v0", 
+            # "MiniGrid-DoorKey-16x16-v0", 
+            # "MiniGrid-FourRooms-v0",
+            # "MiniGrid-MultiRoom-N4-S5-v0",
+            # "MiniGrid-MultiRoom-N6-v0", 
+            # "MiniGrid-KeyCorridorS4R3-v0",
+            # "MiniGrid-KeyCorridorS6R3-v0",
 if __name__ == "__main__":
-    envs = ["MiniGrid-DoorKey-8x8-v0", 
-            "MiniGrid-DoorKey-16x16-v0", 
-            "MiniGrid-FourRooms-v0",
-            "MultiRoom-N4-S5-v0", 
-            "MiniGrid-MultiRoom-N6-v0", 
-            "KeyCorridorS4R3-v0",
-            "MiniGrid-KeyCorridorS6R3-v0",
-            "ObstructedMaze-Full-V3-v0"]
-    modes = ["NoPreTrain", "QuarterPreTrain", "HalfPreTrain" "ThreeQuarterPreTrain"]
-    algos_to_compare = ["NoModel", "ICM", "RND", "NGU", "NovelD", "DEIR"]     # this list is passed INTO the function
+    envs = ["MiniGrid-DoorKey-8x8-v0",
+            ] 
+    modes = ["HalfPreTrain"] # "NoPreTrain", "QuarterPreTrain", "HalfPreTrain", "ThreeQuarterPreTrain"
+    algos_to_compare = ["AEGIS", "AEGIS_plus","AEGIS_global_only", "AEGIS_local_only", "AEGIS_alt"]
 
-    for env in envs:
-        for mode in modes:
-            out_file = f"{env.replace('-', '_')}_{mode}_reward.png"
+    for mode in modes:
+        for env in envs:
+            out_file = f"{env.replace('-', '_')}_{mode}_ablation.png"
             data = plot_algorithms_for_env(env=env,
                                            mode=mode,
                                            algos=algos_to_compare,

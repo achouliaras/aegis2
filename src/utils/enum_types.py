@@ -12,8 +12,10 @@ class ModelType(Enum):
     PlainForward = 6
     PlainInverse = 7
     PlainDiscriminator = 8
-    AEGIS = 9 # Local latent MDP model
-    AEGISV2 = 10 # Local and Global Discriminators
+    AEGIS = 9 #
+    AEGIS_alt = 10 # alternating updates of policy and model
+    AEGIS_global_only = 11 # only global intrinsic reward
+    AEGIS_local_only = 12 # only local intrinsic reward
 
     @staticmethod
     def get_enum_model_type(model_type):
@@ -37,6 +39,12 @@ class ModelType(Enum):
                 return ModelType.PlainInverse
             elif model_type == "plaindiscriminator":
                 return ModelType.PlainDiscriminator
+            elif "alt" in model_type:
+                return ModelType.AEGIS_alt
+            elif "global_only" in model_type:
+                return ModelType.AEGIS_global_only
+            elif "local_only" in model_type:
+                return ModelType.AEGIS_local_only
             elif "aegis" in model_type:
                 return ModelType.AEGIS
             else:

@@ -187,7 +187,7 @@ class PPOModel(ActorCriticCnnPolicy):
             use_status_predictor=self.use_status_predictor,
         )
 
-        if self.int_rew_source == ModelType.AEGIS:
+        if self.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only]:
             self.int_rew_model = AEGIS(
                 aegis_nem_capacity=aegis_nov_exp_mem_capacity,
                 **int_rew_model_kwargs,
