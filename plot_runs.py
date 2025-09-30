@@ -21,6 +21,8 @@ LABELS = {"NoModel": "PPO",
           "AEGIS_alt": "AEGIS Alternating updates",
           "AEGIS_plus": "AEGIS (local + global)",
           "AEGIS": "AEGIS (local * global)",
+          "AEGIS_forward": "AEGIS (forward model)",
+          "AEGIS_forward_diff": "AEGIS (forward novelty diff)",
           }
         #   "AEGIS":r"AEGIS ($\alpha = 0.01$)",
 
@@ -189,7 +191,7 @@ if __name__ == "__main__":
     envs = ["MiniGrid-DoorKey-8x8-v0",
             ] 
     modes = ["HalfPreTrain"] # "NoPreTrain", "QuarterPreTrain", "HalfPreTrain", "ThreeQuarterPreTrain"
-    algos_to_compare = ["AEGIS", "AEGIS_plus","AEGIS_global_only", "AEGIS_local_only", "AEGIS_alt"]
+    algos_to_compare = ["AEGIS", "AEGIS_plus","AEGIS_global_only", "AEGIS_local_only", "AEGIS_alt", "AEGIS_forward", "AEGIS_forward_diff"]
 
     for mode in modes:
         for env in envs:

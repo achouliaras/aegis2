@@ -44,6 +44,7 @@ def plot_all_envs_modes(
     envs: List[str],
     modes: List[str],
     algos: List[str],
+    data_to_plot: str = "rollout/ep_info_rew_mean",
     base_path: str = "logs",
     out_file_name: str = "all_envs_modes.png",
     n_seeds: int = 10,
@@ -75,7 +76,7 @@ def plot_all_envs_modes(
 
             # ---- copy your existing data loading/averaging logic ----
             averaged: Dict[str, pd.DataFrame] = {}
-            required_cols = {"time/total_timesteps", "rollout/ep_info_rew_mean"}
+            required_cols = {"time/total_timesteps", data_to_plot}
 
             for algo in algos:
                 seed_dfs = []
@@ -89,17 +90,17 @@ def plot_all_envs_modes(
                         continue
                     if not required_cols.issubset(df.columns):
                         continue
-                    df = df[["time/total_timesteps", "rollout/ep_info_rew_mean"]]
+                    df = df[["time/total_timesteps", data_to_plot]]
                     seed_dfs.append(df)
 
                 if not seed_dfs:
                     continue
 
-                merged = seed_dfs[0].rename(columns={"rollout/ep_info_rew_mean": f"seed0"})
+                merged = seed_dfs[0].rename(columns={data_to_plot: f"seed0"})
                 for k, df in enumerate(seed_dfs[1:], start=1):
                     merged = pd.merge(
                         merged,
-                        df.rename(columns={"rollout/ep_info_rew_mean": f"seed{k}"}),
+                        df.rename(columns={data_to_plot: f"seed{k}"}),
                         on="time/total_timesteps",
                         how="inner"
                     )
@@ -187,5 +188,7 @@ if __name__ == "__main__":
     modes = ["NoPreTrain", "QuarterPreTrain", "HalfPreTrain", "ThreeQuarterPreTrain"] #  
     algos_to_compare = ["NoModel", "ICM", "RND", "NGU", "NovelD", "DEIR", "AEGIS"]
 
-    plot_all_envs_modes(envs, modes, algos_to_compare, base_path="logs", out_file_name="all_envs_modes.png", n_seeds=10,
+    # plot rewards: rollout/ep_info_rew_mean
+    # plot unique states: rollout/ll_unique_states
+    plot_all_envs_modes(envs, modes, algos_to_compare, data_to_plot="rollout/ll_unique_states", base_path="logs", out_file_name="unique_states_all_envs_modes.png", n_seeds=10,
                         figsize=(28, 12), save_kwargs={"dpi": 400})

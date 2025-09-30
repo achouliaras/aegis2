@@ -1,12 +1,12 @@
 #!/bin/bash
-declare -a test_cases=("ThreeQuarterPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
+declare -a test_cases=("HalfPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
 declare -a methods=("DEIR")
-declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "ObstructedMaze-Full-V3"
+declare -a arr=("KeyCorridorS4R3")
 
 for group_name in "${test_cases[@]}"; do
   for env in "${arr[@]}"; do
     for int_rew_source in "${methods[@]}"; do
-      for seed in 0 1 2 3 4 5 6 7 8 9; do
+      for seed in 10 11 12 13 14 15 16 17 18 19; do
         # Set total training steps based on the environment
         if [ "$env" == "DoorKey-8x8" ]; then
           total_steps=500_000        
@@ -22,10 +22,17 @@ for group_name in "${test_cases[@]}"; do
           total_steps=2_000_000
         fi
 
+        # Logging explored states options
+        # 0 - Not to log
+        # 1 - Log both episodic and lifelong states
+        # 2 - Log episodic visited states only
+        log_explored_states=0
+
         # Default hyperparameters for intrinsic rewards
         int_rew_momentum=0.9
         rnd_err_norm=1
         int_rew_coef=1e-2
+        
         # Adjust hyperparameters based on the intrinsic reward method
         if [ "$int_rew_source" == "NGU" ]; then
           int_rew_coef=1e-3
@@ -63,8 +70,9 @@ for group_name in "${test_cases[@]}"; do
           --model_latents_dim=128 \
           --int_rew_coef=$int_rew_coef \
           --int_rew_momentum=$int_rew_momentum \
-          --rnd_err_norm=$rnd_err_norm
-        
+          --rnd_err_norm=$rnd_err_norm \
+          --log_explored_states=$log_explored_states
+
         # redirect terminal output to null
       done
     done

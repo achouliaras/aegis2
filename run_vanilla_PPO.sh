@@ -22,6 +22,12 @@ for group_name in "${test_cases[@]}"; do
           total_steps=2_000_000
         fi
 
+        # Logging explored states options
+        # 0 - Not to log
+        # 1 - Log both episodic and lifelong states
+        # 2 - Log episodic visited states only
+        log_explored_states=0
+
         # Default hyperparameters for intrinsic rewards
         int_rew_momentum=0.9
         rnd_err_norm=1

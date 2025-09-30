@@ -1,6 +1,6 @@
 #!/bin/bash
 declare -a test_cases=("NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain")
-declare -a methods=("NoModel" "ICM" "RND" "NGU" "NovelD" "DEIR") # "AEGIS" "AEGISV2"
+declare -a methods=("NoModel" "ICM" "RND" "NGU" "NovelD" "DEIR" "AEGIS")
 declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "ObstructedMaze-Full-V3"
 
 for group_name in "${test_cases[@]}"; do
@@ -22,6 +22,12 @@ for group_name in "${test_cases[@]}"; do
           total_steps=2_000_000
         fi
 
+        # Logging explored states options
+        # 0 - Not to log
+        # 1 - Log both episodic and lifelong states
+        # 2 - Log episodic visited states only
+        log_explored_states=0
+        
         # Default hyperparameters for intrinsic rewards
         int_rew_momentum=0.9
         rnd_err_norm=1
