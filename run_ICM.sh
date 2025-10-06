@@ -1,5 +1,5 @@
 #!/bin/bash
-declare -a test_cases=("ThreeQuarterPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
+declare -a test_cases=("NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain")
 declare -a methods=("ICM")
 declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "ObstructedMaze-Full-V3"
 
@@ -32,6 +32,7 @@ for group_name in "${test_cases[@]}"; do
         int_rew_momentum=0.9
         rnd_err_norm=1
         int_rew_coef=1e-2
+        
         # Adjust hyperparameters based on the intrinsic reward method
         if [ "$int_rew_source" == "NGU" ]; then
           int_rew_coef=1e-3

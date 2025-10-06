@@ -118,14 +118,6 @@ class PPORollout(BaseAlgorithm):
         
         self.total_timesteps = policy_kwargs['total_timesteps']
         self.pretrain_percentage = policy_kwargs['pretrain_percentage']
-        
-        self.train_int_rew_flag = None # Other methods do not need this flag
-        if self.int_rew_source in [ModelType.AEGIS_alt]:
-            self.train_int_rew_flag = False # AEGIS for alternating training
-            self.first_reset = True
-            self.use_alt_updates = True # Whether to use alternating updates
-        else:
-            self.use_alt_updates = False
 
         if _init_setup_model:
             self._setup_model()
@@ -143,8 +135,6 @@ class PPORollout(BaseAlgorithm):
         self.policy = self.policy.to(self.device)
 
         buffer_size = self.n_steps
-        if self.use_alt_updates: # For AEGIS, alternating training
-            buffer_size = 2*self.n_steps
 
         self.ppo_rollout_buffer = PPORolloutBuffer(
             buffer_size,
@@ -248,10 +238,12 @@ class PPORollout(BaseAlgorithm):
 
         if self.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only]:
             self.policy.int_rew_model.init_obs_queue(self._last_obs)
-            last_obs_tensor = obs_as_tensor(self._last_obs, self.device)
-            self.policy.int_rew_model.init_novel_experience_memory(last_obs_tensor, 
-                                                                   self._last_model_mems,
-                                                                   device=self.device)
+            # last_obs_tensor = obs_as_tensor(self._last_obs, self.device)
+            # self.policy.int_rew_model.init_novel_experience_memory(last_obs_tensor, 
+            #                                                        self._last_model_mems,
+            #                                                        device=self.device)
+            self._last_global_novelty = np.zeros(self.n_envs, dtype=np.float32)
+        
 
 
     def init_on_rollout_start(self):
@@ -398,6 +390,8 @@ class PPORollout(BaseAlgorithm):
             if dones[env_id]:
                 if policy_mems is not None: policy_mems[env_id] *= 0.0
                 if model_mems is not None: model_mems[env_id] *= 0.0
+                if self.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only]:
+                    if self._last_global_novelty is not None: self._last_global_novelty[env_id] = 0.0
                 self.episodic_obs_emb_history[env_id] = None
                 self.episodic_trj_emb_history[env_id] = None
                 self.rollout_sum_rewards += self.global_episode_rewards[env_id]
@@ -575,7 +569,7 @@ class PPORollout(BaseAlgorithm):
 
         # Aegis
         if self.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only]:
-            intrinsic_rewards, model_mems = self.policy.int_rew_model.get_intrinsic_rewards(
+            intrinsic_rewards, model_mems, last_global_novelty = self.policy.int_rew_model.get_intrinsic_rewards(
                 curr_obs=curr_obs_tensor,
                 next_obs=next_obs_tensor,
                 last_mems=last_model_mem_tensor,
@@ -583,9 +577,11 @@ class PPORollout(BaseAlgorithm):
                 curr_dones=done_tensor,
                 obs_history=self.episodic_obs_emb_history,
                 trj_history=self.episodic_trj_emb_history,
+                last_global_novelty=self._last_global_novelty,
                 stats_logger=self.rollout_stats,
                 int_rew_source=self.int_rew_source
             )
+            self._last_global_novelty = last_global_novelty # update global novelty for next step
             self.policy.int_rew_model.update_obs_queue(
                 iteration=self.iteration,
                 intrinsic_rewards=intrinsic_rewards,
@@ -678,20 +674,9 @@ class PPORollout(BaseAlgorithm):
         n_rollout_steps: int,
     ) -> bool:
         assert self._last_obs is not None, "No previous observation was provided"
+        
         n_steps = 0
-
-        # Reset every other round for alternating updates and for pretraining only
-        if self.policy.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only] and self.use_alt_updates:
-            if self.num_timesteps < self.total_timesteps * self.pretrain_percentage:
-                self.ppo_rollout_buffer.half_reset(self.train_int_rew_flag)
-            else:
-                if self.first_reset:
-                    self.ppo_rollout_buffer.train_int_rew_flag = None
-                    self.ppo_rollout_buffer.buffer_size = self.n_steps
-                    self.first_reset = False
-                self.ppo_rollout_buffer.reset()
-        else:
-            self.ppo_rollout_buffer.reset()
+        self.ppo_rollout_buffer.reset()
             
         # Sample new weights for the state dependent exploration
         if self.use_sde:

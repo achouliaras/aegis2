@@ -146,7 +146,7 @@ class NovelDModel(IntrinsicRewardBaseModel):
         return int_rews, model_mems
 
 
-    def optimize(self, rollout_data, stats_logger):
+    def optimize(self, rollout_data, stats_logger, int_rew_source=None):
         rnd_loss, _, _, _ = \
             self.forward(
                 rollout_data.observations,

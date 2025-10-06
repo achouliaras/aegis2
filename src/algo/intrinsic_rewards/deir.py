@@ -280,7 +280,7 @@ class DiscriminatorModel(IntrinsicRewardBaseModel):
         return int_rews, model_mems
 
 
-    def optimize(self, rollout_data, stats_logger):
+    def optimize(self, rollout_data, stats_logger, int_rew_source=None):
         # Prepare input data
         with th.no_grad():
             actions = rollout_data.actions

@@ -1,10 +1,10 @@
 #!/bin/bash
-declare -a test_cases=("ThreeQuarterPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
+declare -a test_cases=("QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
 declare -a methods=("AEGIS")
-declare -a arr=("FourRooms") # "DoorKey-8x8" "MultiRoom-N4-S5" "KeyCorridorS4R3"
+declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "DoorKey-8x8" "MultiRoom-N4-S5" "KeyCorridorS4R3"
 
-for group_name in "${test_cases[@]}"; do
-  for env in "${arr[@]}"; do
+for env in "${arr[@]}"; do
+  for group_name in "${test_cases[@]}"; do
     for int_rew_source in "${methods[@]}"; do
       for seed in 1; do
         # Set total training steps based on the environment
@@ -31,8 +31,6 @@ for group_name in "${test_cases[@]}"; do
         # Default hyperparameters for intrinsic rewards
         int_rew_momentum=0.9
         rnd_err_norm=1
-        # int_rew_coef=1e-2 # Default value
-        # int_rew_coef=5e-2 # Prev value
         int_rew_coef=1e-2
         
         # Adjust hyperparameters based on the intrinsic reward method

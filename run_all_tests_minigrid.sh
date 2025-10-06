@@ -32,6 +32,7 @@ for group_name in "${test_cases[@]}"; do
         int_rew_momentum=0.9
         rnd_err_norm=1
         int_rew_coef=1e-2
+        
         # Adjust hyperparameters based on the intrinsic reward method
         if [ "$int_rew_source" == "NGU" ]; then
           int_rew_coef=1e-3

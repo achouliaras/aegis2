@@ -103,7 +103,7 @@ class RNDModel(IntrinsicRewardBaseModel):
         return rnd_rewards, model_mems
 
 
-    def optimize(self, rollout_data, stats_logger):
+    def optimize(self, rollout_data, stats_logger, int_rew_source=None):
         rnd_loss, _, _ = \
             self.forward(
                 rollout_data.observations,

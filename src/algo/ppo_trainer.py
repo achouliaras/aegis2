@@ -169,7 +169,7 @@ class PPOTrainer(PPORollout):
         continue_training = True
         epochs = max(self.n_epochs, self.model_n_epochs)
         for epoch in range(epochs):
-            for rollout_data in self.ppo_rollout_buffer.get(self.batch_size, self.train_int_rew_flag):
+            for rollout_data in self.ppo_rollout_buffer.get(self.batch_size):
                 # Train intrinsic reward models
                 if epoch < self.model_n_epochs and model_to_train in ["IntRew", "Both"]:
                     if self.policy.int_rew_source != ModelType.NoModel:
@@ -178,9 +178,6 @@ class PPOTrainer(PPORollout):
                             stats_logger=self.training_stats,
                             int_rew_source=self.policy.int_rew_source,
                         )
-                        # if self.policy.int_rew_source == ModelType.AEGIS:
-                        #     # self.policy.int_rew_model.update_embeddings(device=self.device)
-                        #     pass
                 # Training for policy and value nets
                 if epoch < self.n_epochs and model_to_train in ["Policy", "Both"]:
                     loss, continue_training = self.ppo_update(epoch, rollout_data, clip_range, clip_range_vf)
@@ -287,24 +284,9 @@ class PPOTrainer(PPORollout):
 
         # Log training stats per each iteration
         self.training_stats = StatisticsLogger(mode='train')
-        uses_aegis = self.policy.int_rew_source in [ModelType.AEGIS, ModelType.AEGIS_alt, ModelType.AEGIS_global_only, ModelType.AEGIS_local_only]
 
-        # Alternating updates and data depts for pretraining only
-        if uses_aegis and self.use_alt_updates and self.num_timesteps < self.total_timesteps * self.pretrain_percentage:
-            if self.train_int_rew_flag:
-                self.train_policy_and_models(clip_range, clip_range_vf, "IntRew")
-                # self.policy.int_rew_model.update_embeddings(device=self.device)
-                self.train_int_rew_flag = False
-                # print("Finished LMDP update")
-                # default ppo_loss value to nan when not trained
-                ppo_loss = th.tensor(float('nan'))
-            else:
-                ppo_loss = self.train_policy_and_models(clip_range, clip_range_vf, "Policy")
-                self.train_int_rew_flag = True
-                # print("Finished PPO update")
-        else:
-            # Train PPO policy (+value function) and intrinsic reward models
-            ppo_loss = self.train_policy_and_models(clip_range, clip_range_vf, "Both")
+        # Train PPO policy (+value function) and intrinsic reward models
+        ppo_loss = self.train_policy_and_models(clip_range, clip_range_vf, "Both")
         
         # Update stats
         self._n_updates += self.n_epochs

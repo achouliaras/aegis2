@@ -1,12 +1,12 @@
 #!/bin/bash
-declare -a test_cases=("HalfPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
+declare -a test_cases=("NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain")
 declare -a methods=("DEIR")
-declare -a arr=("KeyCorridorS4R3")
+declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "ObstructedMaze-Full-V3"
 
-for group_name in "${test_cases[@]}"; do
-  for env in "${arr[@]}"; do
+for env in "${arr[@]}"; do
+  for group_name in "${test_cases[@]}"; do
     for int_rew_source in "${methods[@]}"; do
-      for seed in 10 11 12 13 14 15 16 17 18 19; do
+      for seed in 0 1 2 3 4 5 6 7 8 9; do
         # Set total training steps based on the environment
         if [ "$env" == "DoorKey-8x8" ]; then
           total_steps=500_000        

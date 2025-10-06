@@ -198,7 +198,7 @@ class NGUModel(IntrinsicRewardBaseModel):
         return int_rews, last_mems
 
 
-    def optimize(self, rollout_data, stats_logger):
+    def optimize(self, rollout_data, stats_logger, int_rew_source=None):
         actions = rollout_data.actions
         if isinstance(self.action_space, spaces.Discrete):
             actions = rollout_data.actions.long().flatten()
