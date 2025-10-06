@@ -1,7 +1,7 @@
 #!/bin/bash
-declare -a test_cases=("QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain") # "NoPreTrain" "QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain"
+declare -a test_cases=("QuarterPreTrain" "HalfPreTrain" "ThreeQuarterPreTrain")
 declare -a methods=("AEGIS")
-declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "DoorKey-8x8" "MultiRoom-N4-S5" "KeyCorridorS4R3"
+declare -a arr=("DoorKey-8x8" "DoorKey-16x16" "FourRooms" "MultiRoom-N4-S5" "MultiRoom-N6" "KeyCorridorS4R3" "KeyCorridorS6R3") # "ObstructedMaze-Full-V3"
 
 for env in "${arr[@]}"; do
   for group_name in "${test_cases[@]}"; do
