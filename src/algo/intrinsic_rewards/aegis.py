@@ -55,10 +55,6 @@ class AEGIS(IntrinsicRewardBaseModel):
                          model_cnn_norm, model_gru_norm, use_model_rnn, model_mlp_layers,
                          gru_layers, use_status_predictor)
         
-        self.episodic_visited_obs = dict()  # A dict of set
-
-        # The following constant values are from the original paper:
-        # Results show that α = 0.5 and β = 0 works the best (page 7)
         self.obs_rng = obs_rng
         self.lmdp_obs_queue_len = lmdp_obs_queue_len
         self.log_lmdp_verbose = log_lmdp_verbose
@@ -70,7 +66,6 @@ class AEGIS(IntrinsicRewardBaseModel):
         self.novelty_alpha = aegis_novelty_alpha
         self.novelty_beta = aegis_novelty_beta
         self._init_obs_queue()
-        self._init_novel_experience_memory()
 
         self._build()
         self._init_modules()
@@ -83,7 +78,7 @@ class AEGIS(IntrinsicRewardBaseModel):
 
         # Build MLP
         self.model_mlp = AegisModelOutputHeads(
-            inputs_dim=self.model_features_dim,
+            features_dim=self.model_features_dim,
             latents_dim=self.model_latents_dim,
             activation_fn=self.activation_fn,
             action_num=self.action_num,
@@ -128,16 +123,6 @@ class AEGIS(IntrinsicRewardBaseModel):
         self.obs_queue_pos = 0
         self.obs_queue = np.zeros((self.lmdp_obs_queue_len,) + self.obs_shape, dtype=float)
 
-    
-    def _init_novel_experience_memory(self):
-        self.obs_shape = get_obs_shape(self.observation_space)
-        self.global_obs_queue_filled = 0
-        self.global_obs_queue_pos = 0
-        self.global_obs_queue = np.zeros((self.aegis_nem_capacity,) + self.obs_shape, dtype=float)
-        self.global_obs_embs_queue = np.zeros((self.aegis_nem_capacity, self.model_features_dim), dtype=float)
-        self.global_mem_queue = np.zeros((self.aegis_nem_capacity, self.gru_layers, self.model_features_dim), dtype=float)
-        self.novelty_scores = np.zeros((self.aegis_nem_capacity,), dtype=float)
-
 
     def _get_lmdp_embeddings(self, curr_obs, next_obs, last_mems, device=None):
         if not isinstance(curr_obs, Tensor):
@@ -180,11 +165,11 @@ class AEGIS(IntrinsicRewardBaseModel):
         pos_loss_factor = 1 / n_valid_pos_samples if n_valid_pos_samples > 0 else 0.0
         neg_loss_factor = 1 / n_valid_neg_samples if n_valid_neg_samples > 0 else 0.0
 
-        # Get discriminator embeddings
+        # Get embeddings
         _, _, curr_embs, next_embs, _ = self._get_lmdp_embeddings(curr_obs, next_obs, last_mems)
 
         # Inverse model prediction
-        pred_act, likelihoods = self.model_mlp(curr_embs, next_embs, curr_act)
+        pred_obs, pred_act, likelihoods = self.model_mlp(curr_embs, next_embs, curr_act)
 
         # Get likelihoods
         likelihoods = th.sigmoid(likelihoods.view(-1)).view(-1)
@@ -204,19 +189,25 @@ class AEGIS(IntrinsicRewardBaseModel):
         # Get contrastive loss
         contrastive_loss = (pos_dsc_loss + neg_dsc_loss) * 0.5
         
-        # Inverse loss
         curr_dones = curr_dones[:n_half_batch].view(-1)
         n_samples = (1 - curr_dones).sum()
+        
+        # Inverse loss
         inv_losses = F.cross_entropy(pred_act[:n_half_batch], curr_act[:n_half_batch], reduction='none') * (1 - curr_dones)
         inv_loss = inv_losses.sum() * (1 / n_samples if n_samples > 0 else 0.0)
 
-        # if int_rew_source == ModelType.AEGIS_local_only:
-        #     lmdp_loss =  contrastive_loss
-        # elif int_rew_source == ModelType.AEGIS_global_only:
-        #     lmdp_loss =  inv_loss
-        # else: # ModelType.AEGIS or ModelType.AEGIS_alt
-        #     lmdp_loss = 0.2*inv_loss + contrastive_loss
-        lmdp_loss = 0.2*inv_loss + contrastive_loss
+        # Forward model
+        fwd_losses = 0.5 * F.mse_loss(pred_obs[:n_half_batch], next_embs[:n_half_batch], reduction='none') \
+                         * self.model_features_dim  # eta (scaling factor)
+        fwd_losses = fwd_losses.mean(dim=1) * (1 - curr_dones)
+        fwd_loss = fwd_losses.sum() * (1 / n_samples if n_samples > 0 else 0.0)
+
+        if int_rew_source == ModelType.AEGIS_local_only:
+            lmdp_loss =  contrastive_loss
+        elif int_rew_source == ModelType.AEGIS_global_only:
+            lmdp_loss =  0.2*inv_loss + 0.2*fwd_loss
+        else: # ModelType.AEGIS or other variation
+            lmdp_loss = 0.2*inv_loss + 0.2*fwd_loss + contrastive_loss
 
         if self.log_lmdp_verbose:
             with th.no_grad():
@@ -250,24 +241,6 @@ class AEGIS(IntrinsicRewardBaseModel):
         self.obs_queue_pos %= self.lmdp_obs_queue_len
 
 
-    def _add_obs_to_global_memory(self, obs, embs, mems=None, add_pos=None, novelty_score=0.0):
-        """
-        Add one new element into the global experience memory.
-        """
-        if add_pos is not None:
-            assert 0 <= add_pos < self.aegis_nem_capacity
-        else:
-            add_pos = self.global_obs_queue_pos
-
-        self.global_obs_queue[add_pos] = np.copy(obs)
-        self.global_obs_embs_queue[add_pos] = np.copy(embs)
-        self.global_mem_queue[add_pos] = np.copy(mems)
-        self.novelty_scores[add_pos] = novelty_score
-        if self.global_obs_queue_filled < self.aegis_nem_capacity:
-            self.global_obs_queue_filled += 1
-            self.global_obs_queue_pos += 1
-
-
     def init_obs_queue(self, obs_arr):
         """
         In order to ensure the observation queue is not empty on training start
@@ -275,52 +248,7 @@ class AEGIS(IntrinsicRewardBaseModel):
         """
         for obs in obs_arr:
             self._add_obs(obs)
-
-
-    def init_novel_experience_memory(self, initial_obs, last_mems, device):
-        """
-        In order to ensure the novel experience memory is not empty on training start
-        by adding all observations received at time step 0.
-        """
-        n_envs = initial_obs.shape[0]
-
-        with th.no_grad():
-            _, _, initial_embs, _, init_mems = self._get_lmdp_embeddings(initial_obs, initial_obs, last_mems)
-            initial_obs = initial_obs.clone().cpu().numpy()
-            initial_embs = initial_embs.clone().cpu().numpy()
-            init_mems = init_mems.clone().cpu().numpy()
-        
-        for i in range(n_envs):
-            self._add_obs_to_global_memory(initial_obs[i], initial_embs[i], init_mems[i] if self.use_model_rnn else None)
-    
-
-    def calculate_novelty_score(self, obs_embs):
-        if self.obs_queue_filled <= self.aegis_knn_k:
-            print("====== Less obs than k ======", obs_embs.shape)
-            B = obs_embs.shape[0]
-            novelty_scores = th.zeros(B, device=obs_embs.device)
-        else:
-            # Compute the embedding distance between the new observation and all observations in the novel experience memory
-            memory = th.tensor(self.global_obs_embs_queue[:self.obs_queue_filled], dtype=th.float32, device=obs_embs.device)
-            dists = self.calc_euclidean_dists(memory, obs_embs)
-            
-            # Compute the k-nearest neighbours of the new observation in the memory
-            knn_dists, _  = th.topk(dists, self.aegis_knn_k, dim=0, largest=False)
-            # Update the moving average of the k-nearest neighbour distances
-            # self.aegis_moving_avg_dists.update(knn_dists)
-
-            # Normalize the distances with the moving average
-            # norm_knn_dists = knn_dists / (self.aegis_moving_avg_dists.mean + 1e-5)
-            # norm_knn_dists = knn_dists
-            
-            # Cluster the normalized distances. i.e. they become 0 if too small and 0k is a list of k zeros
-            norm_knn_dists = th.clamp(knn_dists - 0.01, min=0.0)
-
-            # Compute the Kernel values between the embedding f (x_t) and its neighbours N_k
-            similarities = 1e-6 / (norm_knn_dists.mean(dim=0) + 1e-6)
-            novelty_scores = 1 - similarities
-        return novelty_scores
-
+ 
 
     def update_obs_queue(self, iteration, intrinsic_rewards, ir_mean, new_obs, stats_logger):
         """
@@ -336,37 +264,8 @@ class AEGIS(IntrinsicRewardBaseModel):
                 stats_logger.add(obs_insertions=0)
 
 
-    def _update_novelty_scores(self):
-        """Refresh all novelty scores"""
-        if self.global_obs_queue_filled == 0:
-            return
-        else:
-            with th.no_grad():
-                queue_obs_embs = th.tensor(self.global_obs_embs_queue[:self.global_obs_queue_filled], dtype=th.float32)
-                novelty_scores = self.calculate_novelty_score(queue_obs_embs[:self.global_obs_queue_filled])
-                self.novelty_scores[:self.global_obs_queue_filled] = novelty_scores
-                # print("====== Updated novelty scores ======")
-
-
-    def update_embeddings(self, device):
-        """
-        Refresh the embeddings and memory states of all observations in the novel experience memory 
-        and recalculate their novelty scores
-        """
-        if self.global_obs_queue_filled == 0:
-            return
-        else:
-            with th.no_grad():
-                obs_tensor = th.tensor(self.global_obs_queue[:self.global_obs_queue_filled], dtype=th.float32, device=device)
-                mems_tensor = th.tensor(self.global_mem_queue[:self.global_obs_queue_filled], dtype=th.float32, device=device)
-                new_embs, _, _, _, new_mems = self._get_lmdp_embeddings(obs_tensor, obs_tensor, mems_tensor, device=device)
-            self.global_obs_embs_queue[:self.global_obs_queue_filled] = new_embs.clone().cpu().numpy()
-            self.global_mem_queue[:self.global_obs_queue_filled] = new_mems.clone().cpu().numpy()
-            self._update_novelty_scores()
-
-
     def get_intrinsic_rewards(self,
-        curr_obs, next_obs, last_mems, curr_act, curr_dones, obs_history, trj_history, stats_logger, int_rew_source=ModelType.AEGIS
+        curr_obs, next_obs, last_mems, curr_act, curr_dones, obs_history, trj_history, last_global_novelty, stats_logger, int_rew_source=ModelType.AEGIS
     ):
         with th.no_grad():
             curr_cnn_embs, next_cnn_embs, \
@@ -375,19 +274,29 @@ class AEGIS(IntrinsicRewardBaseModel):
                     curr_obs, next_obs, last_mems
                 )
             # Inverse model prediction
-            pred_act, _ = self.model_mlp(curr_rnn_embs, next_rnn_embs, curr_act)
-            # Inverse loss
-            curr_dones = curr_dones.view(-1)
-            n_samples = (1 - curr_dones).sum()
-            inv_losses = F.cross_entropy(pred_act, curr_act, reduction='none') * (1 - curr_dones)
-            global_rewards = inv_losses.clone().cpu().numpy() #+1.0
+            pred_obs, pred_act, _ = self.model_mlp(curr_rnn_embs, next_rnn_embs, curr_act)
+
+            # # Inverse loss
+            # curr_dones = curr_dones.view(-1)
+            # inv_losses = F.cross_entropy(pred_act, curr_act, reduction='none') * (1 - curr_dones)
+            # inv_loss = inv_losses.clone().cpu().numpy()
+
+            # Forward loss
+            fwd_losses = 0.5 * F.mse_loss(pred_obs, next_rnn_embs, reduction='none') \
+                            * self.model_features_dim  # eta (scaling factor)
+            fwd_losses = fwd_losses.mean(dim=1) * (1 - curr_dones)
+            fwd_loss = fwd_losses.clone().cpu().numpy()
+
+            # global_novelty = inv_loss
+            # global_novelty = 0.5 * (inv_loss + fwd_loss)
+            global_novelty = fwd_loss
 
         batch_size = curr_obs.shape[0]
         int_rews = np.zeros(batch_size, dtype=np.float32)
         local_rewards = np.zeros(batch_size, dtype=np.float32)
+        global_rewards = np.zeros(batch_size, dtype=np.float32)
         for env_id in range(batch_size):
             # Update the episodic history of observation embeddings
-            curr_env_obs = curr_obs[env_id].unsqueeze(0)
             curr_obs_emb = curr_cnn_embs[env_id].view(1, -1)
             next_obs_emb = next_cnn_embs[env_id].view(1, -1)
             obs_embs = obs_history[env_id]
@@ -409,56 +318,20 @@ class AEGIS(IntrinsicRewardBaseModel):
                 trj_dists = th.ones_like(obs_dists)
 
             # Generate local intrinsic reward
-            # AEGIS: Equation 4 in the main paper (What about scaling to (0,1)?)
+            # AEGIS: Equation 4 in the main paper
             mi_dists = th.pow(obs_dists, 2.0) / (trj_dists + 1e-6)
             local_rewards[env_id] += mi_dists.min().item()
 
-            # # Restriction on IRs Probably BAD for AEGIS
-            # if env_id not in self.episodic_visited_obs:
-            #     self.episodic_visited_obs[env_id] = set()
-
-            # obs_hash = tuple(next_obs[env_id].reshape(-1).tolist())
-            # if obs_hash in self.episodic_visited_obs[env_id]:
-            #     local_rewards[env_id] = 0.0
-            # else:
-            #     self.episodic_visited_obs[env_id].add(obs_hash)
-
-            # # Generate global intrinsic reward
-            # # Compute the novelty score of the current observation
-            # # using the novel experience memory
-            # embeddings = th.cat([curr_obs_emb, next_obs_emb], dim=0)
-            # total_novelty = self.calculate_novelty_score(embeddings)
-            # curr_novelty, next_novelty = total_novelty[0], total_novelty[1]
-            # # AEGIS: Equation 8 in the main paper
-            # novelty = max(next_novelty - curr_novelty * self.novelty_alpha, self.novelty_beta)
-            # global_rewards[env_id] += novelty
-            
-            # # Eviction strategy: Remove the least novel observation if the memory is full
-            # if self.global_obs_queue_filled >= self.aegis_nem_capacity:
-            #     global_obs_queue_add_pos = np.argmin(self.novelty_scores)
-            #     stats_logger.add(obs_evictions=1)
-            # else:
-            #     global_obs_queue_add_pos = self.global_obs_queue_pos
-            #     stats_logger.add(obs_evictions=0)
-            # # Addition strategy: Add the new observation if the novelty score is positive
-            # if novelty > 0.0:
-            #     self._add_obs_to_global_memory(curr_env_obs.clone().cpu().numpy(), 
-            #                   curr_obs_emb.clone().cpu().numpy(), 
-            #                   last_mems[env_id].clone().cpu().numpy() if self.use_model_rnn else None,
-            #                   add_pos=global_obs_queue_add_pos, 
-            #                   novelty_score=novelty)
-            #     stats_logger.add(obs_insertions=1)
-            # else:
-            #     stats_logger.add(obs_insertions=0)
+            # Generate global intrinsic reward
+            global_rewards[env_id] = max(global_novelty[env_id] - last_global_novelty[env_id] * self.novelty_alpha, self.novelty_beta) + 1.0
 
             # AEGIS: Equation 9 in the main paper
             if int_rew_source == ModelType.AEGIS_local_only:
                 int_rews[env_id] += local_rewards[env_id]
             elif int_rew_source == ModelType.AEGIS_global_only:
                 int_rews[env_id] += global_rewards[env_id]
-            else: # ModelType.AEGIS or ModelType.AEGIS_alt
+            else:
                 int_rews[env_id] += local_rewards[env_id] * global_rewards[env_id]
-                # int_rews[env_id] += local_rewards[env_id] + global_rewards[env_id]
 
         # Logging
         stats_logger.add(
@@ -466,7 +339,7 @@ class AEGIS(IntrinsicRewardBaseModel):
             local_rewards=local_rewards,
             global_rewards=global_rewards,
         )
-        return int_rews, model_mems, 
+        return int_rews, model_mems, global_novelty
 
 
     def optimize(self, rollout_data, stats_logger, int_rew_source=ModelType.AEGIS):
